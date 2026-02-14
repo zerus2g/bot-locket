@@ -4,7 +4,7 @@ import random
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
 from telegram.constants import ParseMode
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
-from app.config import *
+from app.config import * # Đảm bảo app/config.py đã có biến ADMIN_IDS = [...]
 from app import database as db
 from app.services import locket, nextdns
 
@@ -70,7 +70,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = db.get_lang(user_id) or DEFAULT_LANG
     
     help_text = T("help_msg", lang)
-    if user_id == ADMIN_ID:
+    
+    # [V-EDIT] Check if user is in ADMIN_IDS list
+    if user_id in ADMIN_IDS:
         help_text += (
             f"\n\n<b>👑 Admin Control:</b>\n"
             f"/noti [msg] - Broadcast message\n"
@@ -83,7 +85,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if user_id != ADMIN_ID: return
+    # [V-EDIT] Check list permissions
+    if user_id not in ADMIN_IDS: return
 
     stats = db.get_stats()
     msg = (
@@ -154,7 +157,8 @@ async def noti_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     lang = db.get_lang(user_id) or DEFAULT_LANG
     
-    if user_id != ADMIN_ID:
+    # [V-EDIT] Check list permissions
+    if user_id not in ADMIN_IDS:
         return
         
     msg = " ".join(context.args)
@@ -178,7 +182,8 @@ async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     lang = db.get_lang(user_id) or DEFAULT_LANG
     
-    if user_id != ADMIN_ID:
+    # [V-EDIT] Check list permissions
+    if user_id not in ADMIN_IDS:
         return
 
     if not context.args:
@@ -194,7 +199,9 @@ async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def set_donate_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if user_id != ADMIN_ID:
+    
+    # [V-EDIT] Check list permissions
+    if user_id not in ADMIN_IDS:
         return
 
     photo = None
@@ -245,8 +252,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.edit_text(T("not_found", lang), parse_mode=ParseMode.HTML)
         return
         
-    # Admin bypass limit check
-    if user_id != ADMIN_ID and not db.check_can_request(user_id):
+    # [V-EDIT] Admin bypass limit check (List support)
+    if user_id not in ADMIN_IDS and not db.check_can_request(user_id):
         await msg.edit_text(T("limit_reached", lang), parse_mode=ParseMode.HTML)
         return
         
@@ -295,7 +302,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     if data == "menu_help":
         help_text = T("help_msg", lang)
-        if user_id == ADMIN_ID:
+        # [V-EDIT] Check list permissions
+        if user_id in ADMIN_IDS:
             help_text += (
                 f"\n\n<b>👑 Admin Control:</b>\n"
                 f"/noti [msg] - Broadcast message\n"
@@ -336,8 +344,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         uid = parts[1]
         username = parts[2] if len(parts) > 2 else uid
         
-        # Admin bypass limit check
-        if user_id != ADMIN_ID and not db.check_can_request(user_id):
+        # [V-EDIT] Admin bypass limit check (List support)
+        if user_id not in ADMIN_IDS and not db.check_can_request(user_id):
             try:
                 await query.answer(T("limit_reached", lang), show_alert=True)
             except:
@@ -415,8 +423,8 @@ async def queue_worker(app, worker_id):
                     else:
                         logger.error(f"Edit msg error: {e}")
 
-            # Double check limit before processing (unless admin)
-            if user_id != ADMIN_ID and not db.check_can_request(user_id):
+            # [V-EDIT] Check limit before processing (unless admin in list)
+            if user_id not in ADMIN_IDS and not db.check_can_request(user_id):
                 await edit(T("limit_reached", lang))
                 request_queue.task_done()
                 continue
@@ -455,7 +463,8 @@ async def queue_worker(app, worker_id):
             db.log_request(user_id, uid, "SUCCESS" if success else "FAIL")
             
             if success:
-                if user_id != ADMIN_ID:
+                # [V-EDIT] Don't count usage for any Admin in list
+                if user_id not in ADMIN_IDS:
                     db.increment_usage(user_id)
                     
                 pid, link = await nextdns.create_profile(NEXTDNS_KEY, safe_log_callback)
