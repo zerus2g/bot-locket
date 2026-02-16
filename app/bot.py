@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import random
-import json
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
 from telegram.constants import ParseMode
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
@@ -97,11 +96,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"/noti [msg] - Broadcast message\n"
             f"/rs [id] - Reset usage limit\n"
             f"/setdonate - Set success photo\n"
-            f"/settoken - Update fetch_token\n"
-            f"/viewtoken - View current tokens\n"
             f"/setlimit - Set daily limit\n"
             f"/genkey - Generate VIP keys\n"
-            f"/listkeys - View unused keys\n"
+            f"/listkeys - View all keys\n"
             f"/stats - View detailed statistics"
         )
         
@@ -241,96 +238,6 @@ async def set_donate_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     else:
         await update.message.reply_text("❌ Please reply to a photo with /setdonate to set it.")
 
-async def settoken_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    
-    if user_id not in ADMIN_IDS:
-        return
-
-    await update.message.reply_text(
-        f"{E_TIP} <b>Cập nhật fetch_token</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━\n"
-        f"Gửi file <b>token.json</b> với nội dung:\n\n"
-        f'<pre>{{\n'
-        f'  "fetch_token": "eyJ..."\n'
-        f'}}</pre>',
-        parse_mode=ParseMode.HTML
-    )
-
-async def handle_token_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle uploaded token.json file from admin."""
-    user_id = update.effective_user.id
-    
-    if user_id not in ADMIN_IDS:
-        return
-    
-    doc = update.message.document
-    if not doc:
-        return
-    
-    fname = (doc.file_name or "").lower()
-    if not fname.endswith(".json"):
-        return
-    
-    try:
-        file = await doc.get_file()
-        file_bytes = await file.download_as_bytearray()
-        data = json.loads(file_bytes.decode("utf-8"))
-    except json.JSONDecodeError:
-        await update.message.reply_text(f"{E_ERROR} File JSON không hợp lệ.", parse_mode=ParseMode.HTML)
-        return
-    except Exception as e:
-        await update.message.reply_text(f"{E_ERROR} Lỗi đọc file: <code>{e}</code>", parse_mode=ParseMode.HTML)
-        return
-    
-    new_fetch_token = data.get("fetch_token", "").strip()
-    
-    if not new_fetch_token or len(new_fetch_token) < 50:
-        await update.message.reply_text(f"{E_ERROR} <code>fetch_token</code> không hợp lệ hoặc thiếu.", parse_mode=ParseMode.HTML)
-        return
-    
-    # Update fetch_token only
-    TOKEN_SETS[0]['fetch_token'] = new_fetch_token
-    
-    # Persist to DB
-    db.save_token_set(0, TOKEN_SETS[0])
-    
-    preview = new_fetch_token[:30] + "..."
-    await update.message.reply_text(
-        f"{E_SUCCESS} <b>fetch_token Updated!</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━\n"
-        f"🔑 <code>{preview}</code>\n"
-        f"💾 Đã lưu vào DB (persist qua restart)",
-        parse_mode=ParseMode.HTML
-    )
-
-async def viewtoken_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    
-    if user_id not in ADMIN_IDS:
-        return
-
-    msg = f"🔑 <b>TOKEN SETS ({len(TOKEN_SETS)} sets)</b>\n━━━━━━━━━━━━━━━━━━━\n"
-    
-    saved = db.load_token_sets()
-    for i, ts in enumerate(TOKEN_SETS):
-        name = ts.get('name', f'Token_{i}')
-        ft_preview = ts.get('fetch_token', 'N/A')[:30] + "..."
-        at_preview = ts.get('app_transaction', 'N/A')[:30] + "..."
-        is_sandbox = ts.get('is_sandbox', False)
-        env = "🟡 Sandbox" if is_sandbox else "🟢 Production"
-        source = "💾 DB" if i in saved else "📄 Config"
-        
-        msg += (
-            f"\n<b>#{i+1} {name}</b>\n"
-            f"  {env} | {source}\n"
-            f"  🔑 <code>{ft_preview}</code>\n"
-            f"  📄 <code>{at_preview}</code>\n"
-        )
-    
-    msg += f"\n━━━━━━━━━━━━━━━━━━━\n{E_TIP} Dùng <code>/settoken</code> để đổi token"
-    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
-
 async def setlimit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     
@@ -420,17 +327,21 @@ async def listkeys_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id not in ADMIN_IDS:
         return
     
-    keys = db.list_unused_keys()
+    keys = db.list_all_keys()
     if not keys:
-        await update.message.reply_text(f"{E_TIP} Không có key nào chưa sử dụng.", parse_mode=ParseMode.HTML)
+        await update.message.reply_text(f"{E_TIP} Chưa có key nào được tạo.", parse_mode=ParseMode.HTML)
         return
     
-    msg = f"🔑 <b>UNUSED KEYS ({len(keys)})</b>\n━━━━━━━━━━━━━━━━━━━\n"
-    for k in keys[:30]:  # Show max 30
-        msg += f"  <code>{k['key']}</code> — {k['type']}\n"
+    unused = [k for k in keys if k['used_by'] is None]
+    used = [k for k in keys if k['used_by'] is not None]
     
-    if len(keys) > 30:
-        msg += f"\n... và {len(keys) - 30} key khác"
+    msg = f"🔑 <b>ALL KEYS ({len(keys)})</b> — ✅ {len(unused)} available | ❌ {len(used)} used\n━━━━━━━━━━━━━━━━━━━\n"
+    for k in keys[:40]:  # Show max 40
+        status = "✅" if k['used_by'] is None else "❌"
+        msg += f"  {status} <code>{k['key']}</code> — {k['type']}\n"
+    
+    if len(keys) > 40:
+        msg += f"\n... và {len(keys) - 40} key khác"
     
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
@@ -615,11 +526,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"/noti [msg] - Broadcast message\n"
                 f"/rs [id] - Reset usage limit\n"
                 f"/setdonate - Set success photo\n"
-                f"/settoken - Update fetch_token\n"
-                f"/viewtoken - View current tokens\n"
                 f"/setlimit - Set daily limit\n"
                 f"/genkey - Generate VIP keys\n"
-                f"/listkeys - View unused keys\n"
+                f"/listkeys - View all keys\n"
                 f"/stats - View detailed statistics"
             )
             
@@ -939,21 +848,12 @@ def run_bot():
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     
-    # Load saved tokens from DB (overwrite config defaults if saved)
-    saved_tokens = db.load_token_sets()
-    for idx, token_data in saved_tokens.items():
-        if idx < len(TOKEN_SETS):
-            TOKEN_SETS[idx] = token_data
-            print(f"  ✅ Loaded Token #{idx+1} from DB: {token_data.get('name', 'Unknown')}")
-    
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("setlang", setlang_command))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("noti", noti_command))
     app.add_handler(CommandHandler("rs", reset_command))
     app.add_handler(CommandHandler("setdonate", set_donate_command))
-    app.add_handler(CommandHandler("settoken", settoken_command))
-    app.add_handler(CommandHandler("viewtoken", viewtoken_command))
     app.add_handler(CommandHandler("setlimit", setlimit_command))
     app.add_handler(CommandHandler("genkey", genkey_command))
     app.add_handler(CommandHandler("listkeys", listkeys_command))
@@ -962,7 +862,6 @@ def run_bot():
     app.add_handler(CommandHandler("stats", stats_command))
     
     app.add_handler(CallbackQueryHandler(callback_handler))
-    app.add_handler(MessageHandler(filters.Document.ALL, handle_token_file))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     
     async def post_init(application):

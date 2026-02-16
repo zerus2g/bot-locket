@@ -1,5 +1,4 @@
 import sqlite3
-import json
 import string
 import random
 from datetime import datetime, timedelta
@@ -202,26 +201,6 @@ def get_stats():
         "unique_users": unique_users
     }
 
-def save_token_set(index, token_data):
-    """Save a token set to DB for persistence across restarts."""
-    key = f"token_set_{index}"
-    value = json.dumps(token_data)
-    set_config(key, value)
-
-def load_token_sets():
-    """Load all saved token sets from DB. Returns dict {index: token_data}."""
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("SELECT key, value FROM bot_config WHERE key LIKE 'token_set_%'")
-    results = {}
-    for row in c.fetchall():
-        try:
-            idx = int(row[0].replace("token_set_", ""))
-            results[idx] = json.loads(row[1])
-        except (ValueError, json.JSONDecodeError):
-            pass
-    conn.close()
-    return results
 
 # ===== KEY SYSTEM =====
 
@@ -305,14 +284,14 @@ def redeem_key(key_str, user_id):
     conn.close()
     return True, "redeem_success", days
 
-def list_unused_keys():
-    """List all unused VIP keys."""
+def list_all_keys():
+    """List all VIP keys (both used and unused)."""
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("SELECT key, key_type, created_at FROM vip_keys WHERE used_by IS NULL ORDER BY created_at DESC")
+    c.execute("SELECT key, key_type, used_by, created_at FROM vip_keys ORDER BY created_at DESC")
     rows = c.fetchall()
     conn.close()
-    return [{"key": r[0], "type": r[1], "created": r[2]} for r in rows]
+    return [{"key": r[0], "type": r[1], "used_by": r[2], "created": r[3]} for r in rows]
 
 # ===== REFERRAL SYSTEM =====
 
