@@ -638,6 +638,80 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    if data == "menu_ref":
+        try:
+            await query.answer()
+        except:
+            pass
+        ref_code = db.get_or_create_referral_code(user_id)
+        stats = db.get_referral_stats(user_id)
+        bot_info = await context.bot.get_me()
+        ref_link = f"https://t.me/{bot_info.username}?start={ref_code}"
+        total_limit = db.get_user_total_limit(user_id)
+        base_limit = db.get_daily_limit()
+        is_vip_user = db.is_vip(user_id)
+        vip_expiry = db.get_vip_expiry(user_id)
+        
+        if lang == "VI":
+            msg = (
+                f"🤝 <b>Hệ Thống Giới Thiệu</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━\n"
+                f"🔗 <b>Link mời:</b>\n<code>{ref_link}</code>\n\n"
+                f"📊 👥 Đã mời: <b>{stats['total_refs']}</b> | 🎁 Bonus: <b>+{stats['bonus']}</b> lượt/ngày\n"
+            )
+            if is_vip_user:
+                msg += f"📋 💎 <b>VIP UNLIMITED</b> (đến {vip_expiry})\n"
+            else:
+                msg += f"📋 🔢 {base_limit} + {stats['bonus']} = <b>{total_limit} lượt/ngày</b>\n"
+            msg += f"\n{E_TIP} Mời 1 bạn = <b>+2</b> cho bạn, bạn bè = <b>+1</b>"
+        else:
+            msg = (
+                f"🤝 <b>Referral System</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━\n"
+                f"🔗 <b>Invite link:</b>\n<code>{ref_link}</code>\n\n"
+                f"📊 👥 Invited: <b>{stats['total_refs']}</b> | 🎁 Bonus: <b>+{stats['bonus']}</b>/day\n"
+            )
+            if is_vip_user:
+                msg += f"📋 💎 <b>VIP UNLIMITED</b> (until {vip_expiry})\n"
+            else:
+                msg += f"📋 🔢 {base_limit} + {stats['bonus']} = <b>{total_limit}/day</b>\n"
+            msg += f"\n{E_TIP} Invite 1 friend = <b>+2</b> for you, friend gets <b>+1</b>"
+        
+        await query.edit_message_text(
+            msg,
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="menu_back")]])
+        )
+        return
+
+    if data == "menu_redeem":
+        try:
+            await query.answer()
+        except:
+            pass
+        if lang == "VI":
+            msg = (
+                f"💎 <b>Kích Hoạt VIP Key</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━\n"
+                f"Gửi lệnh: <code>/redeem [key]</code>\n"
+                f"Ví dụ: <code>/redeem LG-ABCD-1234</code>\n\n"
+                f"{E_TIP} VIP = Unlimited request!"
+            )
+        else:
+            msg = (
+                f"💎 <b>Activate VIP Key</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━\n"
+                f"Send: <code>/redeem [key]</code>\n"
+                f"Example: <code>/redeem LG-ABCD-1234</code>\n\n"
+                f"{E_TIP} VIP = Unlimited requests!"
+            )
+        await query.edit_message_text(
+            msg,
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="menu_back")]])
+        )
+        return
+
     if data == "menu_input":
         try:
             await query.answer()
@@ -848,6 +922,8 @@ async def queue_worker(app, worker_id):
 def get_main_menu_keyboard(lang):
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(T("btn_input", lang), callback_data="menu_input")],
+        [InlineKeyboardButton("🤝 Referral" if lang == "EN" else "🤝 Giới Thiệu", callback_data="menu_ref"),
+         InlineKeyboardButton("💎 VIP Key", callback_data="menu_redeem")],
         [InlineKeyboardButton(T("btn_lang", lang), callback_data="menu_lang"),
          InlineKeyboardButton(T("btn_help", lang), callback_data="menu_help")]
     ])
