@@ -53,27 +53,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     lang = db.get_lang(user_id) or DEFAULT_LANG
     
-    # Handle referral deep link: /start REF-XXXXXX
-    if context.args and len(context.args) > 0:
-        ref_code = context.args[0].strip()
-        if ref_code.startswith("REF-"):
-            referrer_id = db.find_user_by_referral_code(ref_code)
-            if referrer_id and referrer_id != user_id:
-                success = db.process_referral(referrer_id, user_id)
-                if success:
-                    # Notify new user
-                    await update.message.reply_text(T("ref_welcome", lang), parse_mode=ParseMode.HTML)
-                    # Notify referrer
-                    try:
-                        ref_lang = db.get_lang(referrer_id) or DEFAULT_LANG
-                        await context.bot.send_message(
-                            chat_id=referrer_id,
-                            text=T("ref_notify_referrer", ref_lang),
-                            parse_mode=ParseMode.HTML
-                        )
-                    except:
-                        pass
-    
+    if not db.get_user_usage(user_id):
+        pass 
+
     await update.message.reply_text(
         T("welcome", lang),
         parse_mode=ParseMode.HTML,
@@ -96,9 +78,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"/noti [msg] - Broadcast message\n"
             f"/rs [id] - Reset usage limit\n"
             f"/setdonate - Set success photo\n"
-            f"/setlimit - Set daily limit\n"
-            f"/genkey - Generate VIP keys\n"
-            f"/listkeys - View all keys\n"
             f"/stats - View detailed statistics"
         )
         
@@ -238,200 +217,6 @@ async def set_donate_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     else:
         await update.message.reply_text("❌ Please reply to a photo with /setdonate to set it.")
 
-async def setlimit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    
-    if user_id not in ADMIN_IDS:
-        return
-
-    current_limit = db.get_daily_limit()
-    
-    if not context.args:
-        await update.message.reply_text(
-            f"{E_STAT} <b>Daily Limit</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━\n"
-            f"🔢 Limit hiện tại: <b>{current_limit} lượt/ngày</b>\n\n"
-            f"{E_TIP} Dùng: <code>/setlimit [số]</code> để thay đổi",
-            parse_mode=ParseMode.HTML
-        )
-        return
-
-    try:
-        new_limit = int(context.args[0])
-        if new_limit < 1 or new_limit > 100:
-            await update.message.reply_text(f"{E_ERROR} Limit phải từ 1 đến 100.", parse_mode=ParseMode.HTML)
-            return
-    except ValueError:
-        await update.message.reply_text(f"{E_ERROR} Vui lòng nhập số hợp lệ.", parse_mode=ParseMode.HTML)
-        return
-
-    db.set_config("daily_limit", str(new_limit))
-    
-    await update.message.reply_text(
-        f"{E_SUCCESS} <b>Limit Updated!</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━\n"
-        f"📊 {current_limit} lượt ➜ <b>{new_limit} lượt/ngày</b>\n"
-        f"💾 Đã lưu vào DB",
-        parse_mode=ParseMode.HTML
-    )
-
-# ===== KEY SYSTEM (Admin) =====
-
-async def genkey_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id not in ADMIN_IDS:
-        return
-    
-    if len(context.args) < 2:
-        await update.message.reply_text(
-            f"{E_TIP} <b>Tạo Key VIP</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━\n"
-            f"Cách dùng: <code>/genkey [số lượng] [loại]</code>\n\n"
-            f"<b>Loại key:</b>\n"
-            f"  • <code>1d</code> — VIP 1 ngày\n"
-            f"  • <code>7d</code> — VIP 7 ngày\n"
-            f"  • <code>30d</code> — VIP 30 ngày\n\n"
-            f"<b>Ví dụ:</b> <code>/genkey 5 7d</code>",
-            parse_mode=ParseMode.HTML
-        )
-        return
-    
-    try:
-        count = int(context.args[0])
-        if count < 1 or count > 50:
-            await update.message.reply_text(f"{E_ERROR} Số lượng từ 1-50.", parse_mode=ParseMode.HTML)
-            return
-    except ValueError:
-        await update.message.reply_text(f"{E_ERROR} Số lượng không hợp lệ.", parse_mode=ParseMode.HTML)
-        return
-    
-    key_type = context.args[1].lower()
-    if key_type not in ("1d", "7d", "30d"):
-        await update.message.reply_text(f"{E_ERROR} Loại key phải là: <code>1d</code>, <code>7d</code>, <code>30d</code>", parse_mode=ParseMode.HTML)
-        return
-    
-    keys = db.generate_keys(count, key_type, user_id)
-    
-    keys_text = "\n".join([f"<code>{k}</code>" for k in keys])
-    await update.message.reply_text(
-        f"{E_SUCCESS} <b>Đã tạo {len(keys)} key VIP ({key_type})</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━\n"
-        f"{keys_text}\n"
-        f"━━━━━━━━━━━━━━━━━━━\n"
-        f"{E_TIP} User dùng <code>/redeem [key]</code> để kích hoạt",
-        parse_mode=ParseMode.HTML
-    )
-
-async def listkeys_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id not in ADMIN_IDS:
-        return
-    
-    keys = db.list_all_keys()
-    if not keys:
-        await update.message.reply_text(f"{E_TIP} Chưa có key nào được tạo.", parse_mode=ParseMode.HTML)
-        return
-    
-    unused = [k for k in keys if k['used_by'] is None]
-    used = [k for k in keys if k['used_by'] is not None]
-    
-    msg = f"🔑 <b>ALL KEYS ({len(keys)})</b> — ✅ {len(unused)} available | ❌ {len(used)} used\n━━━━━━━━━━━━━━━━━━━\n"
-    for k in keys[:40]:  # Show max 40
-        status = "✅" if k['used_by'] is None else "❌"
-        msg += f"  {status} <code>{k['key']}</code> — {k['type']}\n"
-    
-    if len(keys) > 40:
-        msg += f"\n... và {len(keys) - 40} key khác"
-    
-    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
-
-# ===== KEY SYSTEM (User) =====
-
-async def redeem_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    lang = db.get_lang(user_id) or DEFAULT_LANG
-    
-    if not context.args:
-        await update.message.reply_text(
-            f"{E_TIP} <b>Redeem VIP Key</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━\n"
-            f"{'Cách dùng' if lang == 'VI' else 'Usage'}: <code>/redeem [key]</code>\n"
-            f"{'Ví dụ' if lang == 'VI' else 'Example'}: <code>/redeem LG-ABCD-1234</code>",
-            parse_mode=ParseMode.HTML
-        )
-        return
-    
-    key_str = context.args[0].strip().upper()
-    success, msg_key, days = db.redeem_key(key_str, user_id)
-    
-    if success:
-        expiry = db.get_vip_expiry(user_id) or "N/A"
-        await update.message.reply_text(
-            T("redeem_success", lang).format(days, expiry),
-            parse_mode=ParseMode.HTML
-        )
-    else:
-        await update.message.reply_text(T(msg_key, lang), parse_mode=ParseMode.HTML)
-
-# ===== REFERRAL SYSTEM =====
-
-async def myref_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    lang = db.get_lang(user_id) or DEFAULT_LANG
-    
-    ref_code = db.get_or_create_referral_code(user_id)
-    stats = db.get_referral_stats(user_id)
-    
-    bot_info = await context.bot.get_me()
-    bot_username = bot_info.username
-    ref_link = f"https://t.me/{bot_username}?start={ref_code}"
-    
-    total_limit = db.get_user_total_limit(user_id)
-    base_limit = db.get_daily_limit()
-    vip_expiry = db.get_vip_expiry(user_id)
-    is_vip = db.is_vip(user_id)
-    
-    if lang == "VI":
-        msg = (
-            f"🤝 <b>Hệ Thống Giới Thiệu</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━\n"
-            f"🔗 <b>Link mời:</b>\n<code>{ref_link}</code>\n\n"
-            f"📊 <b>Thống kê:</b>\n"
-            f"  👥 Đã mời: <b>{stats['total_refs']}</b> người\n"
-            f"  🎁 Bonus: <b>+{stats['bonus']}</b> lượt/ngày\n\n"
-            f"📋 <b>Limit hiện tại:</b>\n"
-        )
-        if is_vip:
-            msg += f"  💎 <b>VIP UNLIMITED</b> (đến {vip_expiry})\n"
-        else:
-            msg += f"  🔢 {base_limit} (gốc) + {stats['bonus']} (ref) = <b>{total_limit} lượt/ngày</b>\n"
-        msg += (
-            f"\n━━━━━━━━━━━━━━━━━━━\n"
-            f"{E_TIP} Mời 1 bạn = <b>+2 lượt/ngày</b> cho bạn\n"
-            f"🎁 Người được mời = <b>+1 lượt/ngày</b> bonus"
-        )
-    else:
-        msg = (
-            f"🤝 <b>Referral System</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━\n"
-            f"🔗 <b>Invite link:</b>\n<code>{ref_link}</code>\n\n"
-            f"📊 <b>Stats:</b>\n"
-            f"  👥 Invited: <b>{stats['total_refs']}</b> users\n"
-            f"  🎁 Bonus: <b>+{stats['bonus']}</b> requests/day\n\n"
-            f"📋 <b>Current limit:</b>\n"
-        )
-        if is_vip:
-            msg += f"  💎 <b>VIP UNLIMITED</b> (until {vip_expiry})\n"
-        else:
-            msg += f"  🔢 {base_limit} (base) + {stats['bonus']} (ref) = <b>{total_limit}/day</b>\n"
-        msg += (
-            f"\n━━━━━━━━━━━━━━━━━━━\n"
-            f"{E_TIP} Invite 1 friend = <b>+2 requests/day</b> for you\n"
-            f"🎁 Invited user gets <b>+1 request/day</b> bonus"
-        )
-    
-    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
-
 async def show_language_select(update: Update):
     keyboard = [
         [InlineKeyboardButton("Tiếng Việt 🇻🇳", callback_data="setlang_VI")],
@@ -469,9 +254,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     # [V-EDIT] Admin bypass limit check (List support)
     if user_id not in ADMIN_IDS and not db.check_can_request(user_id):
-        total = db.get_user_total_limit(user_id)
-        limit_msg = f"{E_LIMIT} Đã đạt giới hạn request ({total}/{total})." if lang == "VI" else f"{E_LIMIT} Daily limit reached ({total}/{total})."
-        await msg.edit_text(limit_msg, parse_mode=ParseMode.HTML)
+        await msg.edit_text(T("limit_reached", lang), parse_mode=ParseMode.HTML)
         return
         
     await msg.edit_text(T("checking_status", lang), parse_mode=ParseMode.HTML)
@@ -526,9 +309,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"/noti [msg] - Broadcast message\n"
                 f"/rs [id] - Reset usage limit\n"
                 f"/setdonate - Set success photo\n"
-                f"/setlimit - Set daily limit\n"
-                f"/genkey - Generate VIP keys\n"
-                f"/listkeys - View all keys\n"
                 f"/stats - View detailed statistics"
             )
             
@@ -544,80 +324,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             T("menu_msg", lang),
             parse_mode=ParseMode.HTML,
             reply_markup=get_main_menu_keyboard(lang)
-        )
-        return
-
-    if data == "menu_ref":
-        try:
-            await query.answer()
-        except:
-            pass
-        ref_code = db.get_or_create_referral_code(user_id)
-        stats = db.get_referral_stats(user_id)
-        bot_info = await context.bot.get_me()
-        ref_link = f"https://t.me/{bot_info.username}?start={ref_code}"
-        total_limit = db.get_user_total_limit(user_id)
-        base_limit = db.get_daily_limit()
-        is_vip_user = db.is_vip(user_id)
-        vip_expiry = db.get_vip_expiry(user_id)
-        
-        if lang == "VI":
-            msg = (
-                f"🤝 <b>Hệ Thống Giới Thiệu</b>\n"
-                f"━━━━━━━━━━━━━━━━━━━\n"
-                f"🔗 <b>Link mời:</b>\n<code>{ref_link}</code>\n\n"
-                f"📊 👥 Đã mời: <b>{stats['total_refs']}</b> | 🎁 Bonus: <b>+{stats['bonus']}</b> lượt/ngày\n"
-            )
-            if is_vip_user:
-                msg += f"📋 💎 <b>VIP UNLIMITED</b> (đến {vip_expiry})\n"
-            else:
-                msg += f"📋 🔢 {base_limit} + {stats['bonus']} = <b>{total_limit} lượt/ngày</b>\n"
-            msg += f"\n{E_TIP} Mời 1 bạn = <b>+2</b> cho bạn, bạn bè = <b>+1</b>"
-        else:
-            msg = (
-                f"🤝 <b>Referral System</b>\n"
-                f"━━━━━━━━━━━━━━━━━━━\n"
-                f"🔗 <b>Invite link:</b>\n<code>{ref_link}</code>\n\n"
-                f"📊 👥 Invited: <b>{stats['total_refs']}</b> | 🎁 Bonus: <b>+{stats['bonus']}</b>/day\n"
-            )
-            if is_vip_user:
-                msg += f"📋 💎 <b>VIP UNLIMITED</b> (until {vip_expiry})\n"
-            else:
-                msg += f"📋 🔢 {base_limit} + {stats['bonus']} = <b>{total_limit}/day</b>\n"
-            msg += f"\n{E_TIP} Invite 1 friend = <b>+2</b> for you, friend gets <b>+1</b>"
-        
-        await query.edit_message_text(
-            msg,
-            parse_mode=ParseMode.HTML,
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="menu_back")]])
-        )
-        return
-
-    if data == "menu_redeem":
-        try:
-            await query.answer()
-        except:
-            pass
-        if lang == "VI":
-            msg = (
-                f"💎 <b>Kích Hoạt VIP Key</b>\n"
-                f"━━━━━━━━━━━━━━━━━━━\n"
-                f"Gửi lệnh: <code>/redeem [key]</code>\n"
-                f"Ví dụ: <code>/redeem LG-ABCD-1234</code>\n\n"
-                f"{E_TIP} VIP = Unlimited request!"
-            )
-        else:
-            msg = (
-                f"💎 <b>Activate VIP Key</b>\n"
-                f"━━━━━━━━━━━━━━━━━━━\n"
-                f"Send: <code>/redeem [key]</code>\n"
-                f"Example: <code>/redeem LG-ABCD-1234</code>\n\n"
-                f"{E_TIP} VIP = Unlimited requests!"
-            )
-        await query.edit_message_text(
-            msg,
-            parse_mode=ParseMode.HTML,
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="menu_back")]])
         )
         return
 
@@ -641,9 +347,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # [V-EDIT] Admin bypass limit check (List support)
         if user_id not in ADMIN_IDS and not db.check_can_request(user_id):
             try:
-                total = db.get_user_total_limit(user_id)
-                limit_msg = f"Đã đạt giới hạn ({total}/{total})" if lang == "VI" else f"Daily limit reached ({total}/{total})"
-                await query.answer(limit_msg, show_alert=True)
+                await query.answer(T("limit_reached", lang), show_alert=True)
             except:
                 pass
             return
@@ -676,11 +380,13 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
 async def queue_worker(app, worker_id):
-    # Select token index based on worker ID (round-robin)
+    # Select token based on worker ID (round-robin)
     # worker_id is 1-based, so subtract 1
     token_idx = (worker_id - 1) % len(TOKEN_SETS)
+    token_config = TOKEN_SETS[token_idx]
+    token_name = f"Token-{token_idx+1}"
     
-    print(f"Worker #{worker_id} started using Token-{token_idx+1}...")
+    print(f"Worker #{worker_id} started using {token_name}...")
     
     while True:
         try:
@@ -697,10 +403,6 @@ async def queue_worker(app, worker_id):
                 if item in pending_items:
                     pending_items.remove(item)
                 await update_pending_positions(app) # Enabled queue updates
-            
-            # Read token dynamically so /settoken updates take effect immediately
-            token_config = TOKEN_SETS[token_idx]
-            token_name = f"Token-{token_idx+1}"
             
             print(f"{Clr.BLUE}[Worker #{worker_id}][{token_name}] Processing:{Clr.ENDC} UID={uid} | UserID={user_id}")
             
@@ -723,9 +425,7 @@ async def queue_worker(app, worker_id):
 
             # [V-EDIT] Check limit before processing (unless admin in list)
             if user_id not in ADMIN_IDS and not db.check_can_request(user_id):
-                total = db.get_user_total_limit(user_id)
-                limit_msg = f"{E_LIMIT} Đã đạt giới hạn request ({total}/{total})." if lang == "VI" else f"{E_LIMIT} Daily limit reached ({total}/{total})."
-                await edit(limit_msg)
+                await edit(T("limit_reached", lang))
                 request_queue.task_done()
                 continue
             
@@ -831,8 +531,6 @@ async def queue_worker(app, worker_id):
 def get_main_menu_keyboard(lang):
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(T("btn_input", lang), callback_data="menu_input")],
-        [InlineKeyboardButton("🤝 Referral" if lang == "EN" else "🤝 Giới Thiệu", callback_data="menu_ref"),
-         InlineKeyboardButton("💎 VIP Key", callback_data="menu_redeem")],
         [InlineKeyboardButton(T("btn_lang", lang), callback_data="menu_lang"),
          InlineKeyboardButton(T("btn_help", lang), callback_data="menu_help")]
     ])
@@ -854,11 +552,6 @@ def run_bot():
     app.add_handler(CommandHandler("noti", noti_command))
     app.add_handler(CommandHandler("rs", reset_command))
     app.add_handler(CommandHandler("setdonate", set_donate_command))
-    app.add_handler(CommandHandler("setlimit", setlimit_command))
-    app.add_handler(CommandHandler("genkey", genkey_command))
-    app.add_handler(CommandHandler("listkeys", listkeys_command))
-    app.add_handler(CommandHandler("redeem", redeem_command))
-    app.add_handler(CommandHandler("myref", myref_command))
     app.add_handler(CommandHandler("stats", stats_command))
     
     app.add_handler(CallbackQueryHandler(callback_handler))
@@ -870,5 +563,5 @@ def run_bot():
             asyncio.create_task(queue_worker(application, i))
 
     app.post_init = post_init
-    print(f"Bot is running... ({NUM_WORKERS} workers, {len(TOKEN_SETS)} token sets)")
+    print(f"Bot is running... ({NUM_WORKERS} workers)")
     app.run_polling()
