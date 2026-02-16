@@ -2,6 +2,8 @@ import os
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8553705581:AAENrlmYghSXIycqQQYjnUC8ZRgRf9yUb4A")
 NEXTDNS_KEY = os.environ.get("NEXTDNS_KEY", "7bfc6786092e8ca0a42891785bd9a8cc0eef1172")
+MONGO_URI = os.environ.get("MONGO_URI", None) # MongoDB Connection String
+
 
 TOKEN_SETS = [
     {
