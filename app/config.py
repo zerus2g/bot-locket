@@ -61,7 +61,7 @@ TEXTS = {
         ),
         "resolving": f"{E_LOADING} <b>Đang phân giải UID...</b>",
         "not_found": f"{E_ERROR} Không tìm thấy User.",
-        "limit_reached": f"{E_LIMIT} Đã đạt giới hạn request (5/5).",
+        "limit_reached": f"{E_LIMIT} Đã đạt giới hạn request hôm nay.",
         "queue_almost": f"{E_LOADING} <b>Sắp đến lượt bạn!</b>\nCòn <b>2 người</b> nữa là đến lượt bạn. Hãy chuẩn bị sẵn sàng! 🚀",
         "admin_noti_sent": f"{E_SUCCESS} Đã gửi thông báo đến tất cả user.",
         "admin_reset": f"{E_SUCCESS} Đã reset lượt dùng cho user {{}}.",
@@ -94,7 +94,12 @@ TEXTS = {
             f"{E_ANDROID} <b>Android</b>: <code>{{}}.dns.nextdns.io</code>\n"
             f"(Cài đặt → Mạng → Private DNS)\n\n"
             f"{E_TIP} <b>Lưu ý</b>: Bắt buộc cài DNS để không bị mất Gold!"
-        )
+        ),
+        "redeem_success": f"{E_SUCCESS} <b>Kích hoạt VIP thành công!</b>\n💎 VIP: <b>{{}}</b> ngày\n⏳ Hết hạn: <code>{{}}</code>",
+        "redeem_invalid": f"{E_ERROR} Key không hợp lệ hoặc không tồn tại.",
+        "redeem_used": f"{E_ERROR} Key này đã được sử dụng.",
+        "ref_welcome": f"{E_SUCCESS} Bạn được mời bởi một người dùng! 🎁 +1 lượt/ngày bonus!",
+        "ref_notify_referrer": f"{E_SUCCESS} Có người tham gia qua link mời của bạn! 🎉 +2 lượt/ngày bonus!"
     },
     "EN": {
         "welcome": f"{E_SUCCESS} <b>Locket Gold Activator</b>\n\nWelcome! Please select your language or use the menu below.",
@@ -117,7 +122,7 @@ TEXTS = {
         ),
         "resolving": f"{E_LOADING} <b>Resolving UID...</b>",
         "not_found": f"{E_ERROR} User not found.",
-        "limit_reached": f"{E_LIMIT} Daily limit reached (5/5).",
+        "limit_reached": f"{E_LIMIT} Daily limit reached.",
         "queue_almost": f"{E_LOADING} <b>Almost your turn!</b>\n<b>2 people</b> ahead of you. Get ready! 🚀",
         "admin_noti_sent": f"{E_SUCCESS} Notification sent to all users.",
         "admin_reset": f"{E_SUCCESS} Usage reset for user {{}}.",
@@ -150,7 +155,12 @@ TEXTS = {
             f"{E_ANDROID} <b>Android</b>: <code>{{}}.dns.nextdns.io</code>\n"
             f"(Settings → Network → Private DNS)\n\n"
             f"{E_TIP} <b>Note</b>: DNS is required to keep Gold active!"
-        )
+        ),
+        "redeem_success": f"{E_SUCCESS} <b>VIP Activated!</b>\n💎 VIP: <b>{{}}</b> days\n⏳ Expires: <code>{{}}</code>",
+        "redeem_invalid": f"{E_ERROR} Invalid or non-existent key.",
+        "redeem_used": f"{E_ERROR} This key has already been used.",
+        "ref_welcome": f"{E_SUCCESS} You were invited by a user! 🎁 +1 daily request bonus!",
+        "ref_notify_referrer": f"{E_SUCCESS} Someone joined via your referral! 🎉 +2 daily request bonus!"
     }
 }
 

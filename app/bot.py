@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import random
+import json
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
 from telegram.constants import ParseMode
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
@@ -53,9 +54,27 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     lang = db.get_lang(user_id) or DEFAULT_LANG
     
-    if not db.get_user_usage(user_id):
-        pass 
-
+    # Handle referral deep link: /start REF-XXXXXX
+    if context.args and len(context.args) > 0:
+        ref_code = context.args[0].strip()
+        if ref_code.startswith("REF-"):
+            referrer_id = db.find_user_by_referral_code(ref_code)
+            if referrer_id and referrer_id != user_id:
+                success = db.process_referral(referrer_id, user_id)
+                if success:
+                    # Notify new user
+                    await update.message.reply_text(T("ref_welcome", lang), parse_mode=ParseMode.HTML)
+                    # Notify referrer
+                    try:
+                        ref_lang = db.get_lang(referrer_id) or DEFAULT_LANG
+                        await context.bot.send_message(
+                            chat_id=referrer_id,
+                            text=T("ref_notify_referrer", ref_lang),
+                            parse_mode=ParseMode.HTML
+                        )
+                    except:
+                        pass
+    
     await update.message.reply_text(
         T("welcome", lang),
         parse_mode=ParseMode.HTML,
@@ -80,6 +99,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"/setdonate - Set success photo\n"
             f"/settoken - Update fetch_token\n"
             f"/viewtoken - View current tokens\n"
+            f"/setlimit - Set daily limit\n"
+            f"/genkey - Generate VIP keys\n"
+            f"/listkeys - View unused keys\n"
             f"/stats - View detailed statistics"
         )
         
@@ -221,57 +243,66 @@ async def set_donate_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def settoken_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    lang = db.get_lang(user_id) or DEFAULT_LANG
     
     if user_id not in ADMIN_IDS:
         return
 
-    if not context.args:
-        await update.message.reply_text(
-            f"{E_TIP} <b>Cách dùng:</b>\n"
-            f"<code>/settoken &lt;fetch_token_mới&gt;</code>\n\n"
-            f"Hoặc gửi cả 2 token (cách nhau bằng dấu xuống dòng):\n"
-            f"<code>/settoken\nfetch_token\napp_transaction</code>",
-            parse_mode=ParseMode.HTML
-        )
-        return
+    await update.message.reply_text(
+        f"{E_TIP} <b>Cập nhật fetch_token</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━\n"
+        f"Gửi file <b>token.json</b> với nội dung:\n\n"
+        f'<pre>{{\n'
+        f'  "fetch_token": "eyJ..."\n'
+        f'}}</pre>',
+        parse_mode=ParseMode.HTML
+    )
 
-    # Parse input: first arg is fetch_token, second (optional) is app_transaction
-    full_text = update.message.text.split(maxsplit=1)
-    if len(full_text) < 2:
-        await update.message.reply_text(f"{E_ERROR} Thiếu token. Vui lòng nhập fetch_token.", parse_mode=ParseMode.HTML)
+async def handle_token_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle uploaded token.json file from admin."""
+    user_id = update.effective_user.id
+    
+    if user_id not in ADMIN_IDS:
         return
     
-    parts = full_text[1].strip().split("\n")
-    new_fetch_token = parts[0].strip()
-    new_app_transaction = parts[1].strip() if len(parts) > 1 else None
-    
-    if len(new_fetch_token) < 50:
-        await update.message.reply_text(f"{E_ERROR} Token không hợp lệ (quá ngắn).", parse_mode=ParseMode.HTML)
+    doc = update.message.document
+    if not doc:
         return
-
-    # Update TOKEN_SETS[0] in memory
+    
+    fname = (doc.file_name or "").lower()
+    if not fname.endswith(".json"):
+        return
+    
+    try:
+        file = await doc.get_file()
+        file_bytes = await file.download_as_bytearray()
+        data = json.loads(file_bytes.decode("utf-8"))
+    except json.JSONDecodeError:
+        await update.message.reply_text(f"{E_ERROR} File JSON không hợp lệ.", parse_mode=ParseMode.HTML)
+        return
+    except Exception as e:
+        await update.message.reply_text(f"{E_ERROR} Lỗi đọc file: <code>{e}</code>", parse_mode=ParseMode.HTML)
+        return
+    
+    new_fetch_token = data.get("fetch_token", "").strip()
+    
+    if not new_fetch_token or len(new_fetch_token) < 50:
+        await update.message.reply_text(f"{E_ERROR} <code>fetch_token</code> không hợp lệ hoặc thiếu.", parse_mode=ParseMode.HTML)
+        return
+    
+    # Update fetch_token only
     TOKEN_SETS[0]['fetch_token'] = new_fetch_token
-    if new_app_transaction and len(new_app_transaction) > 50:
-        TOKEN_SETS[0]['app_transaction'] = new_app_transaction
-
+    
     # Persist to DB
     db.save_token_set(0, TOKEN_SETS[0])
     
     preview = new_fetch_token[:30] + "..."
-    msg = (
-        f"{E_SUCCESS} <b>Token Updated!</b>\n"
+    await update.message.reply_text(
+        f"{E_SUCCESS} <b>fetch_token Updated!</b>\n"
         f"━━━━━━━━━━━━━━━━━━━\n"
-        f"🔑 <b>fetch_token</b>: <code>{preview}</code>\n"
+        f"🔑 <code>{preview}</code>\n"
+        f"💾 Đã lưu vào DB (persist qua restart)",
+        parse_mode=ParseMode.HTML
     )
-    if new_app_transaction and len(new_app_transaction) > 50:
-        msg += f"📄 <b>app_transaction</b>: ✅ Updated\n"
-    else:
-        msg += f"📄 <b>app_transaction</b>: ⏭ Giữ nguyên\n"
-    
-    msg += f"━━━━━━━━━━━━━━━━━━━\n💾 Đã lưu vào DB (persist qua restart)"
-    
-    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 async def viewtoken_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -281,15 +312,13 @@ async def viewtoken_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     msg = f"🔑 <b>TOKEN SETS ({len(TOKEN_SETS)} sets)</b>\n━━━━━━━━━━━━━━━━━━━\n"
     
+    saved = db.load_token_sets()
     for i, ts in enumerate(TOKEN_SETS):
         name = ts.get('name', f'Token_{i}')
         ft_preview = ts.get('fetch_token', 'N/A')[:30] + "..."
         at_preview = ts.get('app_transaction', 'N/A')[:30] + "..."
         is_sandbox = ts.get('is_sandbox', False)
         env = "🟡 Sandbox" if is_sandbox else "🟢 Production"
-        
-        # Check if this token was loaded from DB
-        saved = db.load_token_sets()
         source = "💾 DB" if i in saved else "📄 Config"
         
         msg += (
@@ -300,6 +329,196 @@ async def viewtoken_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     
     msg += f"\n━━━━━━━━━━━━━━━━━━━\n{E_TIP} Dùng <code>/settoken</code> để đổi token"
+    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+
+async def setlimit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    
+    if user_id not in ADMIN_IDS:
+        return
+
+    current_limit = db.get_daily_limit()
+    
+    if not context.args:
+        await update.message.reply_text(
+            f"{E_STAT} <b>Daily Limit</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━\n"
+            f"🔢 Limit hiện tại: <b>{current_limit} lượt/ngày</b>\n\n"
+            f"{E_TIP} Dùng: <code>/setlimit [số]</code> để thay đổi",
+            parse_mode=ParseMode.HTML
+        )
+        return
+
+    try:
+        new_limit = int(context.args[0])
+        if new_limit < 1 or new_limit > 100:
+            await update.message.reply_text(f"{E_ERROR} Limit phải từ 1 đến 100.", parse_mode=ParseMode.HTML)
+            return
+    except ValueError:
+        await update.message.reply_text(f"{E_ERROR} Vui lòng nhập số hợp lệ.", parse_mode=ParseMode.HTML)
+        return
+
+    db.set_config("daily_limit", str(new_limit))
+    
+    await update.message.reply_text(
+        f"{E_SUCCESS} <b>Limit Updated!</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━\n"
+        f"📊 {current_limit} lượt ➜ <b>{new_limit} lượt/ngày</b>\n"
+        f"💾 Đã lưu vào DB",
+        parse_mode=ParseMode.HTML
+    )
+
+# ===== KEY SYSTEM (Admin) =====
+
+async def genkey_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_IDS:
+        return
+    
+    if len(context.args) < 2:
+        await update.message.reply_text(
+            f"{E_TIP} <b>Tạo Key VIP</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━\n"
+            f"Cách dùng: <code>/genkey [số lượng] [loại]</code>\n\n"
+            f"<b>Loại key:</b>\n"
+            f"  • <code>1d</code> — VIP 1 ngày\n"
+            f"  • <code>7d</code> — VIP 7 ngày\n"
+            f"  • <code>30d</code> — VIP 30 ngày\n\n"
+            f"<b>Ví dụ:</b> <code>/genkey 5 7d</code>",
+            parse_mode=ParseMode.HTML
+        )
+        return
+    
+    try:
+        count = int(context.args[0])
+        if count < 1 or count > 50:
+            await update.message.reply_text(f"{E_ERROR} Số lượng từ 1-50.", parse_mode=ParseMode.HTML)
+            return
+    except ValueError:
+        await update.message.reply_text(f"{E_ERROR} Số lượng không hợp lệ.", parse_mode=ParseMode.HTML)
+        return
+    
+    key_type = context.args[1].lower()
+    if key_type not in ("1d", "7d", "30d"):
+        await update.message.reply_text(f"{E_ERROR} Loại key phải là: <code>1d</code>, <code>7d</code>, <code>30d</code>", parse_mode=ParseMode.HTML)
+        return
+    
+    keys = db.generate_keys(count, key_type, user_id)
+    
+    keys_text = "\n".join([f"<code>{k}</code>" for k in keys])
+    await update.message.reply_text(
+        f"{E_SUCCESS} <b>Đã tạo {len(keys)} key VIP ({key_type})</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━\n"
+        f"{keys_text}\n"
+        f"━━━━━━━━━━━━━━━━━━━\n"
+        f"{E_TIP} User dùng <code>/redeem [key]</code> để kích hoạt",
+        parse_mode=ParseMode.HTML
+    )
+
+async def listkeys_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_IDS:
+        return
+    
+    keys = db.list_unused_keys()
+    if not keys:
+        await update.message.reply_text(f"{E_TIP} Không có key nào chưa sử dụng.", parse_mode=ParseMode.HTML)
+        return
+    
+    msg = f"🔑 <b>UNUSED KEYS ({len(keys)})</b>\n━━━━━━━━━━━━━━━━━━━\n"
+    for k in keys[:30]:  # Show max 30
+        msg += f"  <code>{k['key']}</code> — {k['type']}\n"
+    
+    if len(keys) > 30:
+        msg += f"\n... và {len(keys) - 30} key khác"
+    
+    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+
+# ===== KEY SYSTEM (User) =====
+
+async def redeem_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    lang = db.get_lang(user_id) or DEFAULT_LANG
+    
+    if not context.args:
+        await update.message.reply_text(
+            f"{E_TIP} <b>Redeem VIP Key</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━\n"
+            f"{'Cách dùng' if lang == 'VI' else 'Usage'}: <code>/redeem [key]</code>\n"
+            f"{'Ví dụ' if lang == 'VI' else 'Example'}: <code>/redeem LG-ABCD-1234</code>",
+            parse_mode=ParseMode.HTML
+        )
+        return
+    
+    key_str = context.args[0].strip().upper()
+    success, msg_key, days = db.redeem_key(key_str, user_id)
+    
+    if success:
+        expiry = db.get_vip_expiry(user_id) or "N/A"
+        await update.message.reply_text(
+            T("redeem_success", lang).format(days, expiry),
+            parse_mode=ParseMode.HTML
+        )
+    else:
+        await update.message.reply_text(T(msg_key, lang), parse_mode=ParseMode.HTML)
+
+# ===== REFERRAL SYSTEM =====
+
+async def myref_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    lang = db.get_lang(user_id) or DEFAULT_LANG
+    
+    ref_code = db.get_or_create_referral_code(user_id)
+    stats = db.get_referral_stats(user_id)
+    
+    bot_info = await context.bot.get_me()
+    bot_username = bot_info.username
+    ref_link = f"https://t.me/{bot_username}?start={ref_code}"
+    
+    total_limit = db.get_user_total_limit(user_id)
+    base_limit = db.get_daily_limit()
+    vip_expiry = db.get_vip_expiry(user_id)
+    is_vip = db.is_vip(user_id)
+    
+    if lang == "VI":
+        msg = (
+            f"🤝 <b>Hệ Thống Giới Thiệu</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━\n"
+            f"🔗 <b>Link mời:</b>\n<code>{ref_link}</code>\n\n"
+            f"📊 <b>Thống kê:</b>\n"
+            f"  👥 Đã mời: <b>{stats['total_refs']}</b> người\n"
+            f"  🎁 Bonus: <b>+{stats['bonus']}</b> lượt/ngày\n\n"
+            f"📋 <b>Limit hiện tại:</b>\n"
+        )
+        if is_vip:
+            msg += f"  💎 <b>VIP UNLIMITED</b> (đến {vip_expiry})\n"
+        else:
+            msg += f"  🔢 {base_limit} (gốc) + {stats['bonus']} (ref) = <b>{total_limit} lượt/ngày</b>\n"
+        msg += (
+            f"\n━━━━━━━━━━━━━━━━━━━\n"
+            f"{E_TIP} Mời 1 bạn = <b>+2 lượt/ngày</b> cho bạn\n"
+            f"🎁 Người được mời = <b>+1 lượt/ngày</b> bonus"
+        )
+    else:
+        msg = (
+            f"🤝 <b>Referral System</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━\n"
+            f"🔗 <b>Invite link:</b>\n<code>{ref_link}</code>\n\n"
+            f"📊 <b>Stats:</b>\n"
+            f"  👥 Invited: <b>{stats['total_refs']}</b> users\n"
+            f"  🎁 Bonus: <b>+{stats['bonus']}</b> requests/day\n\n"
+            f"📋 <b>Current limit:</b>\n"
+        )
+        if is_vip:
+            msg += f"  💎 <b>VIP UNLIMITED</b> (until {vip_expiry})\n"
+        else:
+            msg += f"  🔢 {base_limit} (base) + {stats['bonus']} (ref) = <b>{total_limit}/day</b>\n"
+        msg += (
+            f"\n━━━━━━━━━━━━━━━━━━━\n"
+            f"{E_TIP} Invite 1 friend = <b>+2 requests/day</b> for you\n"
+            f"🎁 Invited user gets <b>+1 request/day</b> bonus"
+        )
+    
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 async def show_language_select(update: Update):
@@ -339,7 +558,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     # [V-EDIT] Admin bypass limit check (List support)
     if user_id not in ADMIN_IDS and not db.check_can_request(user_id):
-        await msg.edit_text(T("limit_reached", lang), parse_mode=ParseMode.HTML)
+        total = db.get_user_total_limit(user_id)
+        limit_msg = f"{E_LIMIT} Đã đạt giới hạn request ({total}/{total})." if lang == "VI" else f"{E_LIMIT} Daily limit reached ({total}/{total})."
+        await msg.edit_text(limit_msg, parse_mode=ParseMode.HTML)
         return
         
     await msg.edit_text(T("checking_status", lang), parse_mode=ParseMode.HTML)
@@ -396,6 +617,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"/setdonate - Set success photo\n"
                 f"/settoken - Update fetch_token\n"
                 f"/viewtoken - View current tokens\n"
+                f"/setlimit - Set daily limit\n"
+                f"/genkey - Generate VIP keys\n"
+                f"/listkeys - View unused keys\n"
                 f"/stats - View detailed statistics"
             )
             
@@ -434,7 +658,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # [V-EDIT] Admin bypass limit check (List support)
         if user_id not in ADMIN_IDS and not db.check_can_request(user_id):
             try:
-                await query.answer(T("limit_reached", lang), show_alert=True)
+                total = db.get_user_total_limit(user_id)
+                limit_msg = f"Đã đạt giới hạn ({total}/{total})" if lang == "VI" else f"Daily limit reached ({total}/{total})"
+                await query.answer(limit_msg, show_alert=True)
             except:
                 pass
             return
@@ -467,13 +693,11 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
 async def queue_worker(app, worker_id):
-    # Select token based on worker ID (round-robin)
+    # Select token index based on worker ID (round-robin)
     # worker_id is 1-based, so subtract 1
     token_idx = (worker_id - 1) % len(TOKEN_SETS)
-    token_config = TOKEN_SETS[token_idx]
-    token_name = f"Token-{token_idx+1}"
     
-    print(f"Worker #{worker_id} started using {token_name}...")
+    print(f"Worker #{worker_id} started using Token-{token_idx+1}...")
     
     while True:
         try:
@@ -490,6 +714,10 @@ async def queue_worker(app, worker_id):
                 if item in pending_items:
                     pending_items.remove(item)
                 await update_pending_positions(app) # Enabled queue updates
+            
+            # Read token dynamically so /settoken updates take effect immediately
+            token_config = TOKEN_SETS[token_idx]
+            token_name = f"Token-{token_idx+1}"
             
             print(f"{Clr.BLUE}[Worker #{worker_id}][{token_name}] Processing:{Clr.ENDC} UID={uid} | UserID={user_id}")
             
@@ -512,7 +740,9 @@ async def queue_worker(app, worker_id):
 
             # [V-EDIT] Check limit before processing (unless admin in list)
             if user_id not in ADMIN_IDS and not db.check_can_request(user_id):
-                await edit(T("limit_reached", lang))
+                total = db.get_user_total_limit(user_id)
+                limit_msg = f"{E_LIMIT} Đã đạt giới hạn request ({total}/{total})." if lang == "VI" else f"{E_LIMIT} Daily limit reached ({total}/{total})."
+                await edit(limit_msg)
                 request_queue.task_done()
                 continue
             
@@ -648,9 +878,15 @@ def run_bot():
     app.add_handler(CommandHandler("setdonate", set_donate_command))
     app.add_handler(CommandHandler("settoken", settoken_command))
     app.add_handler(CommandHandler("viewtoken", viewtoken_command))
+    app.add_handler(CommandHandler("setlimit", setlimit_command))
+    app.add_handler(CommandHandler("genkey", genkey_command))
+    app.add_handler(CommandHandler("listkeys", listkeys_command))
+    app.add_handler(CommandHandler("redeem", redeem_command))
+    app.add_handler(CommandHandler("myref", myref_command))
     app.add_handler(CommandHandler("stats", stats_command))
     
     app.add_handler(CallbackQueryHandler(callback_handler))
+    app.add_handler(MessageHandler(filters.Document.ALL, handle_token_file))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     
     async def post_init(application):
