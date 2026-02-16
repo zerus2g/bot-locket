@@ -1,5 +1,6 @@
 import sqlite3
 import time
+import json
 from datetime import datetime
 
 DB_NAME = "bot_data.db"
@@ -137,5 +138,26 @@ def get_stats():
         "fail": fail,
         "unique_users": unique_users
     }
+
+def save_token_set(index, token_data):
+    """Save a token set to DB for persistence across restarts."""
+    key = f"token_set_{index}"
+    value = json.dumps(token_data)
+    set_config(key, value)
+
+def load_token_sets():
+    """Load all saved token sets from DB. Returns dict {index: token_data}."""
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("SELECT key, value FROM bot_config WHERE key LIKE 'token_set_%'")
+    results = {}
+    for row in c.fetchall():
+        try:
+            idx = int(row[0].replace("token_set_", ""))
+            results[idx] = json.loads(row[1])
+        except (ValueError, json.JSONDecodeError):
+            pass
+    conn.close()
+    return results
 
 init_db()

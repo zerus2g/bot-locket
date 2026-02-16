@@ -78,6 +78,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"/noti [msg] - Broadcast message\n"
             f"/rs [id] - Reset usage limit\n"
             f"/setdonate - Set success photo\n"
+            f"/settoken - Update fetch_token\n"
+            f"/viewtoken - View current tokens\n"
             f"/stats - View detailed statistics"
         )
         
@@ -217,6 +219,89 @@ async def set_donate_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     else:
         await update.message.reply_text("❌ Please reply to a photo with /setdonate to set it.")
 
+async def settoken_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    lang = db.get_lang(user_id) or DEFAULT_LANG
+    
+    if user_id not in ADMIN_IDS:
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            f"{E_TIP} <b>Cách dùng:</b>\n"
+            f"<code>/settoken &lt;fetch_token_mới&gt;</code>\n\n"
+            f"Hoặc gửi cả 2 token (cách nhau bằng dấu xuống dòng):\n"
+            f"<code>/settoken\nfetch_token\napp_transaction</code>",
+            parse_mode=ParseMode.HTML
+        )
+        return
+
+    # Parse input: first arg is fetch_token, second (optional) is app_transaction
+    full_text = update.message.text.split(maxsplit=1)
+    if len(full_text) < 2:
+        await update.message.reply_text(f"{E_ERROR} Thiếu token. Vui lòng nhập fetch_token.", parse_mode=ParseMode.HTML)
+        return
+    
+    parts = full_text[1].strip().split("\n")
+    new_fetch_token = parts[0].strip()
+    new_app_transaction = parts[1].strip() if len(parts) > 1 else None
+    
+    if len(new_fetch_token) < 50:
+        await update.message.reply_text(f"{E_ERROR} Token không hợp lệ (quá ngắn).", parse_mode=ParseMode.HTML)
+        return
+
+    # Update TOKEN_SETS[0] in memory
+    TOKEN_SETS[0]['fetch_token'] = new_fetch_token
+    if new_app_transaction and len(new_app_transaction) > 50:
+        TOKEN_SETS[0]['app_transaction'] = new_app_transaction
+
+    # Persist to DB
+    db.save_token_set(0, TOKEN_SETS[0])
+    
+    preview = new_fetch_token[:30] + "..."
+    msg = (
+        f"{E_SUCCESS} <b>Token Updated!</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━\n"
+        f"🔑 <b>fetch_token</b>: <code>{preview}</code>\n"
+    )
+    if new_app_transaction and len(new_app_transaction) > 50:
+        msg += f"📄 <b>app_transaction</b>: ✅ Updated\n"
+    else:
+        msg += f"📄 <b>app_transaction</b>: ⏭ Giữ nguyên\n"
+    
+    msg += f"━━━━━━━━━━━━━━━━━━━\n💾 Đã lưu vào DB (persist qua restart)"
+    
+    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+
+async def viewtoken_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    
+    if user_id not in ADMIN_IDS:
+        return
+
+    msg = f"🔑 <b>TOKEN SETS ({len(TOKEN_SETS)} sets)</b>\n━━━━━━━━━━━━━━━━━━━\n"
+    
+    for i, ts in enumerate(TOKEN_SETS):
+        name = ts.get('name', f'Token_{i}')
+        ft_preview = ts.get('fetch_token', 'N/A')[:30] + "..."
+        at_preview = ts.get('app_transaction', 'N/A')[:30] + "..."
+        is_sandbox = ts.get('is_sandbox', False)
+        env = "🟡 Sandbox" if is_sandbox else "🟢 Production"
+        
+        # Check if this token was loaded from DB
+        saved = db.load_token_sets()
+        source = "💾 DB" if i in saved else "📄 Config"
+        
+        msg += (
+            f"\n<b>#{i+1} {name}</b>\n"
+            f"  {env} | {source}\n"
+            f"  🔑 <code>{ft_preview}</code>\n"
+            f"  📄 <code>{at_preview}</code>\n"
+        )
+    
+    msg += f"\n━━━━━━━━━━━━━━━━━━━\n{E_TIP} Dùng <code>/settoken</code> để đổi token"
+    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+
 async def show_language_select(update: Update):
     keyboard = [
         [InlineKeyboardButton("Tiếng Việt 🇻🇳", callback_data="setlang_VI")],
@@ -309,6 +394,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"/noti [msg] - Broadcast message\n"
                 f"/rs [id] - Reset usage limit\n"
                 f"/setdonate - Set success photo\n"
+                f"/settoken - Update fetch_token\n"
+                f"/viewtoken - View current tokens\n"
                 f"/stats - View detailed statistics"
             )
             
@@ -546,12 +633,21 @@ def run_bot():
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     
+    # Load saved tokens from DB (overwrite config defaults if saved)
+    saved_tokens = db.load_token_sets()
+    for idx, token_data in saved_tokens.items():
+        if idx < len(TOKEN_SETS):
+            TOKEN_SETS[idx] = token_data
+            print(f"  ✅ Loaded Token #{idx+1} from DB: {token_data.get('name', 'Unknown')}")
+    
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("setlang", setlang_command))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("noti", noti_command))
     app.add_handler(CommandHandler("rs", reset_command))
     app.add_handler(CommandHandler("setdonate", set_donate_command))
+    app.add_handler(CommandHandler("settoken", settoken_command))
+    app.add_handler(CommandHandler("viewtoken", viewtoken_command))
     app.add_handler(CommandHandler("stats", stats_command))
     
     app.add_handler(CallbackQueryHandler(callback_handler))
@@ -563,5 +659,5 @@ def run_bot():
             asyncio.create_task(queue_worker(application, i))
 
     app.post_init = post_init
-    print(f"Bot is running... ({NUM_WORKERS} workers)")
+    print(f"Bot is running... ({NUM_WORKERS} workers, {len(TOKEN_SETS)} token sets)")
     app.run_polling()
