@@ -4,3 +4,4 @@ aiohttp
 flask
 pymongo
 dnspython
+python-dotenv

@@ -56,11 +56,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not db.get_user_usage(user_id):
         pass 
 
-    await update.message.reply_text(
-        T("welcome", lang),
-        parse_mode=ParseMode.HTML,
-        reply_markup=get_main_menu_keyboard(lang)
-    )
+    # Nếu được gọi từ CallbackQuery (Inline Keyboard Button)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(
+            T("welcome", lang),
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_main_menu_keyboard(lang)
+        )
+    else:
+        await update.message.reply_text(
+            T("welcome", lang),
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_main_menu_keyboard(lang)
+        )
 
 async def setlang_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_language_select(update)
@@ -102,6 +110,8 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"⏳ <b>Queue Size</b>: {request_queue.qsize()}\n"
     )
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+
+# --- User Commands ---
 
 # --- Admin Commands ---
 async def broadcast_worker(bot, users, text, chat_id, message_id):
