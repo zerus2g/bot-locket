@@ -1,12 +1,21 @@
 import os
-from flask import Flask
+from flask import Flask, render_template
 from threading import Thread
+import logging
 
-app = Flask('')
+app = Flask(__name__, template_folder='app/templates')
+
+# Disable Flask logging unless error
+log = logging.getLogger('werkzeug')
+log.setLevel(logging.ERROR) # Set logging level to ERROR to suppress INFO/WARNING messages
 
 @app.route('/')
 def home():
     return "I am alive! DarkForge-X is watching."
+
+@app.route('/webapp')
+def webapp():
+    return render_template('webapp.html')
 
 def run():
     # Lấy PORT từ biến môi trường của Render, mặc định là 8080 nếu chạy local

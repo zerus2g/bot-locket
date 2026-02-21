@@ -55,6 +55,7 @@ TEXTS = {
             f"<b>{E_MENU} Danh Sách Lệnh:</b>\n\n"
             f"/start - Khởi động bot & Menu chính\n"
             f"/setlang - Đổi ngôn ngữ (VI/EN)\n"
+            f"/feedback [lời nhắn] - Gửi lỗi/góp ý cho Admin\n"
             f"/help - Xem trợ giúp này\n\n"
             f"<b>{E_TIP} Cách dùng:</b>\n"
             f"1. Bấm nút '🔑 Nhập User Locket'\n"
@@ -68,6 +69,9 @@ TEXTS = {
         "admin_noti_sent": f"{E_SUCCESS} Đã gửi thông báo đến tất cả user.",
         "admin_reset": f"{E_SUCCESS} Đã reset lượt dùng cho user {{}}.",
         "admin_only": f"{E_ERROR} Bạn không có quyền sử dụng lệnh này.",
+        "feedback_sent": f"{E_SUCCESS} <b>Đã gửi phản hồi!</b> Admin sẽ sớm xem xét hỗ trợ bạn.",
+        "feedback_empty": f"{E_TIP} <b>Sử dụng:</b> /feedback [nội dung cần hỗ trợ]\n<i>Ví dụ: /feedback Admin ơi em bị lỗi kích hoạt...</i>",
+        "spam_warning": f"{E_LIMIT} <b>Spam Alert!</b>\nThao tác quá nhanh. Vui lòng thử lại sau vài giây!",
         "checking_status": f"{E_LOADING} <b>Đang kiểm tra Entitlement...</b>",
         "free_status": "Free (Chưa Active)",
         "gold_active": f"{E_SUCCESS} <b>Gold Đã Active</b> (Hết hạn: {{}})",
@@ -111,6 +115,7 @@ TEXTS = {
             f"<b>{E_MENU} Commands:</b>\n\n"
             f"/start - Main Menu\n"
             f"/setlang - Change Language\n"
+            f"/feedback [message] - Send feedback to Admin\n"
             f"/help - Show this help\n\n"
             f"<b>{E_TIP} How to use:</b>\n"
             f"1. Click '🔑 Input Locket User'\n"
@@ -124,6 +129,9 @@ TEXTS = {
         "admin_noti_sent": f"{E_SUCCESS} Notification sent to all users.",
         "admin_reset": f"{E_SUCCESS} Usage reset for user {{}}.",
         "admin_only": f"{E_ERROR} You don't have permission.",
+        "feedback_sent": f"{E_SUCCESS} <b>Feedback sent!</b> Admin will review it shortly.",
+        "feedback_empty": f"{E_TIP} <b>Usage:</b> /feedback [your issue or message]\n<i>Example: /feedback Hi Admin, my activation failed...</i>",
+        "spam_warning": f"{E_LIMIT} <b>Spam Alert!</b>\nYou are clicking too fast. Please wait a few seconds!",
         "checking_status": f"{E_LOADING} <b>Checking Entitlements...</b>",
         "free_status": "Free (Inactive)",
         "gold_active": f"{E_SUCCESS} <b>Gold Active</b> (Exp: {{}})",

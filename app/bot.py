@@ -1,7 +1,9 @@
 import asyncio
 import logging
 import random
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
+import time
+import json
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ForceReply, WebAppInfo
 from telegram.constants import ParseMode
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from app.config import * # Đảm bảo app/config.py đã có biến ADMIN_IDS = [...]
@@ -13,6 +15,9 @@ logger = logging.getLogger(__name__)
 request_queue = asyncio.Queue()
 pending_items = []
 queue_lock = asyncio.Lock()
+
+# Anti-Spam Dictionary: {user_id: last_click_timestamp}
+user_clicks = {}
 
 class Clr:
     HEADER = '\033[95m'
@@ -56,19 +61,41 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not db.get_user_usage(user_id):
         pass 
 
-    # Nếu được gọi từ CallbackQuery (Inline Keyboard Button)
+    banner = db.get_config("start_banner", None)
+    
     if update.callback_query:
-        await update.callback_query.edit_message_text(
-            T("welcome", lang),
-            parse_mode=ParseMode.HTML,
-            reply_markup=get_main_menu_keyboard(lang)
-        )
+        # Avoid exception if we edit with identical message
+        try:
+            if banner:
+                await update.callback_query.message.delete()
+                await context.bot.send_photo(
+                    chat_id=user_id,
+                    photo=banner,
+                    caption=T("welcome", lang),
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=get_main_menu_keyboard(lang)
+                )
+            else:
+                await update.callback_query.edit_message_text(
+                    T("welcome", lang),
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=get_main_menu_keyboard(lang)
+                )
+        except: pass
     else:
-        await update.message.reply_text(
-            T("welcome", lang),
-            parse_mode=ParseMode.HTML,
-            reply_markup=get_main_menu_keyboard(lang)
-        )
+        if banner:
+            await update.message.reply_photo(
+                photo=banner,
+                caption=T("welcome", lang),
+                parse_mode=ParseMode.HTML,
+                reply_markup=get_main_menu_keyboard(lang)
+            )
+        else:
+            await update.message.reply_text(
+                T("welcome", lang),
+                parse_mode=ParseMode.HTML,
+                reply_markup=get_main_menu_keyboard(lang)
+            )
 
 async def setlang_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_language_select(update)
@@ -83,10 +110,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id in ADMIN_IDS:
         help_text += (
             f"\n\n<b>👑 Admin Control:</b>\n"
-            f"/noti [msg] - Broadcast message\n"
-            f"/rs [id] - Reset usage limit\n"
+            f"/noti [msg] - Broadcast msg, use {{name}} for dynamic names\n"
+            f"/setbanner - Set /start welcome image\n"
             f"/setdonate - Set success photo\n"
-            f"/stats - View detailed statistics"
+            f"/rs [id] - Reset usage limit\n"
+            f"/stats - View statistics"
         )
         
     await update.message.reply_text(help_text, parse_mode=ParseMode.HTML)
@@ -112,6 +140,35 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 # --- User Commands ---
+async def feedback_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    lang = db.get_lang(user_id) or DEFAULT_LANG
+    
+    if not context.args:
+        await update.message.reply_text(T("feedback_empty", lang), parse_mode=ParseMode.HTML)
+        return
+        
+    msg_text = update.message.text.split(maxsplit=1)[1]
+    name = update.effective_user.full_name or "Không rõ"
+    
+    feedback_content = f"📩 <b>NEW FEEDBACK</b>\n👤 <b>Từ:</b> {name} [<code>{user_id}</code>]\n\n📝 <b>Nội dung:</b>\n{msg_text}"
+    
+    # Gửi tin nhắn này cho admin đầu tiên trong list (hoặc tất cả)
+    admin_id = ADMIN_IDS[0] if ADMIN_IDS else None
+    if admin_id:
+        try:
+            await context.bot.send_message(
+                chat_id=admin_id,
+                text=feedback_content,
+                parse_mode=ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(f"Nhắn riêng cho User", url=f"tg://user?id={user_id}")]])
+            )
+            # Thêm Reply chức năng nếu admin reply tin nhắn
+        except Exception as e:
+            logger.error(f"Cannot send feedback to admin: {e}")
+            pass
+            
+    await update.message.reply_text(T("feedback_sent", lang), parse_mode=ParseMode.HTML)
 
 # --- Admin Commands ---
 async def broadcast_worker(bot, users, text, chat_id, message_id):
@@ -119,9 +176,20 @@ async def broadcast_worker(bot, users, text, chat_id, message_id):
     fail = 0
     total = len(users)
     
-    for i, uid in enumerate(users):
+    for i, user_record in enumerate(users):
+        uid = user_record['id']
+        name = user_record['name'] or "bạn"
+        
+        # Format the dynamic message
+        custom_text = text.replace("{name}", name).replace("{id}", str(uid))
+        
         try:
-            await bot.send_message(chat_id=uid, text=f"📢 <b>ADMIN NOTIFICATION</b>\n\n{text}", parse_mode=ParseMode.HTML)
+            await bot.send_message(
+                chat_id=uid, 
+                text=f"📢 <b>ADMIN NOTIFICATION</b>\n\n{custom_text}", 
+                parse_mode=ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("👌 Đã hiểu (Dismiss)", callback_data="dismiss_msg")]])
+            )
             success += 1
         except Exception:
             fail += 1
@@ -176,17 +244,33 @@ async def noti_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Usage: /noti {message}")
         return
 
-    users = db.get_all_users()
-    if not users:
-        await update.message.reply_text("No users found.")
+    users_list = []
+    if db.db is not None:
+        # Lấy full users list thay vì chỉ distinct
+        all_logs = db.db.usage_logs.find({})
+        all_settings = db.db.user_settings.find({})
+        seen = set()
+        
+        for u in all_logs:
+            if u["user_id"] not in seen:
+                users_list.append({"id": u["user_id"], "name": u.get("name", "")})
+                seen.add(u["user_id"])
+        
+        for u in all_settings:
+            if u["user_id"] not in seen:
+                users_list.append({"id": u["user_id"], "name": u.get("name", "")})
+                seen.add(u["user_id"])
+                
+    if not users_list:
+        await update.message.reply_text("No users found in database.")
         return
 
     status_msg = await update.message.reply_text(
-        f"{E_LOADING} <b>Starting broadcast to {len(users)} users...</b>",
+        f"{E_LOADING} <b>Starting broadcast to {len(users_list)} users...</b>",
         parse_mode=ParseMode.HTML
     )
     
-    asyncio.create_task(broadcast_worker(context.bot, users, msg, status_msg.chat_id, status_msg.message_id))
+    asyncio.create_task(broadcast_worker(context.bot, users_list, msg, status_msg.chat_id, status_msg.message_id))
 
 async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -227,6 +311,47 @@ async def set_donate_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     else:
         await update.message.reply_text("❌ Please reply to a photo with /setdonate to set it.")
 
+async def set_banner_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_IDS:
+        return
+        
+    photo = None
+    if update.message.reply_to_message and update.message.reply_to_message.photo:
+        photo = update.message.reply_to_message.photo[-1]
+    elif update.message.photo:
+        photo = update.message.photo[-1]
+        
+    if photo:
+        file_id = photo.file_id
+        db.set_config("start_banner", file_id)
+        await update.message.reply_text(f"✅ Updated Welcome Banner Photo ID:\n<code>{file_id}</code>", parse_mode=ParseMode.HTML)
+    else:
+        # If no photo, clear the banner
+        db.set_config("start_banner", None)
+        await update.message.reply_text("❌ Banner removed. Bot will use text only for /start.")
+
+async def admin_reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_IDS:
+        return
+        
+    if update.message.reply_to_message and "NEW FEEDBACK" in (update.message.reply_to_message.text or ""):
+        # Extract target user_id from the format [12345678]
+        try:
+            target_str = update.message.reply_to_message.text.split("Từ:")[1].split("[")[1].split("]")[0]
+            target_uid = int(target_str)
+            
+            admin_answer = update.message.text
+            await context.bot.send_message(
+                chat_id=target_uid,
+                text=f"👑 <b>Admin vừa trả lời bạn:</b>\n\n{admin_answer}",
+                parse_mode=ParseMode.HTML
+            )
+            await update.message.reply_text("✅ Đã chuyển câu trả lời cho User.")
+        except Exception as e:
+            await update.message.reply_text(f"❌ Không lấy được ID User từ tin nhắn gốc để reply. {e}")
+
 async def show_language_select(update: Update):
     keyboard = [
         [InlineKeyboardButton("Tiếng Việt 🇻🇳", callback_data="setlang_VI")],
@@ -247,6 +372,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text.strip()
     lang = db.get_lang(user_id) or DEFAULT_LANG
+    
+    # Sửa / Cập nhật Tên User
+    db.set_user_name(user_id, update.effective_user.full_name)
 
     if "locket.cam/" in text:
         username = text.split("locket.cam/")[-1].split("?")[0]
@@ -255,6 +383,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         username = text
 
+    await queue_request(update, context, username)
+
+
+async def queue_request(update: Update, context: ContextTypes.DEFAULT_TYPE, username: str):
+    user_id = update.effective_user.id
+    lang = db.get_lang(user_id) or DEFAULT_LANG
+    
     msg = await update.message.reply_text(T("resolving", lang), parse_mode=ParseMode.HTML)
     
     uid = await locket.resolve_uid(username)
@@ -288,11 +423,54 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=reply_markup
     )
 
+async def handle_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Xử lý dữ liệu trả về từ Telegram Mini App"""
+    if not update.message.web_app_data:
+        return
+        
+    user_id = update.effective_user.id
+    lang = db.get_lang(user_id) or DEFAULT_LANG
+    db.set_user_name(user_id, update.effective_user.full_name)
+    
+    try:
+        data = json.loads(update.message.web_app_data.data)
+        if data.get("action") == "activate" and data.get("username"):
+            username = data["username"]
+            
+            # Xử lý locket.cam link format y như handle_text
+            if "locket.cam/" in username:
+                username = username.split("locket.cam/")[-1].split("?")[0]
+            elif "locket.com/" in username:
+                username = username.split("locket.com/")[-1].split("?")[0]
+            
+            await queue_request(update, context, username)
+    except Exception as e:
+        logger.error(f"WebApp Data parse error: {e}")
+        await update.message.reply_text(f"{E_ERROR} Lỗi xử lý dữ liệu WebApp!", parse_mode=ParseMode.HTML)
+
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     data = query.data
     user_id = query.from_user.id
     lang = db.get_lang(user_id) or DEFAULT_LANG
+    
+    # 🛡️ ANTI-SPAM LOGIC
+    current_time = time.time()
+    last_click = user_clicks.get(user_id, 0)
+    
+    if current_time - last_click < 2:
+        try:
+            await query.answer(T("spam_warning", lang), show_alert=True)
+        except: pass
+        return
+        
+    user_clicks[user_id] = current_time
+
+    if data == "dismiss_msg":
+        try:
+            await query.message.delete()
+        except: pass
+        return
 
     if data.startswith("setlang_"):
         new_lang = data.split("_")[1]
@@ -315,11 +493,12 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # [V-EDIT] Check list permissions
         if user_id in ADMIN_IDS:
             help_text += (
-                f"\n\n<b>👑 Admin Control:</b>\n"
-                f"/noti [msg] - Broadcast message\n"
-                f"/rs [id] - Reset usage limit\n"
-                f"/setdonate - Set success photo\n"
-                f"/stats - View detailed statistics"
+        f"\n\n<b>👑 Admin Control:</b>\n"
+        f"/noti [msg] - Broadcast msg, use {{name}} for dynamic names\n"
+        f"/setbanner - Set /start welcome image\n"
+        f"/setdonate - Set success photo\n"
+        f"/rs [id] - Reset usage limit\n"
+        f"/stats - View statistics"
             )
             
         await query.edit_message_text(
@@ -539,7 +718,11 @@ async def queue_worker(app, worker_id):
             request_queue.task_done()
 
 def get_main_menu_keyboard(lang):
+    # Sử dụng WebApp rực rỡ
+    webapp_url = "https://locketgold-926y.onrender.com/webapp"
+    
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚀 MỞ TOOL HACK LOCKET", web_app=WebAppInfo(url=webapp_url))],
         [InlineKeyboardButton(T("btn_input", lang), callback_data="menu_input")],
         [InlineKeyboardButton(T("btn_lang", lang), callback_data="menu_lang"),
          InlineKeyboardButton(T("btn_help", lang), callback_data="menu_help")]
@@ -558,14 +741,20 @@ def run_bot():
     
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("setlang", setlang_command))
+    app.add_handler(CommandHandler("feedback", feedback_command))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("noti", noti_command))
     app.add_handler(CommandHandler("rs", reset_command))
     app.add_handler(CommandHandler("setdonate", set_donate_command))
+    app.add_handler(CommandHandler("setbanner", set_banner_command))
     app.add_handler(CommandHandler("stats", stats_command))
     
     app.add_handler(CallbackQueryHandler(callback_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    
+    # Tách luồng xử lý tin tức text: một cho Admin trả lời feedback, một cho logic nhập UID, một cho WebApp
+    app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, handle_webapp_data))
+    app.add_handler(MessageHandler(filters.TEXT & filters.REPLY, admin_reply_handler), group=1)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text), group=0)
     
     async def post_init(application):
         # Dynamically create workers based on config

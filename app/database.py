@@ -64,6 +64,14 @@ def set_lang(user_id, lang):
         upsert=True
     )
 
+def set_user_name(user_id, name):
+    if not db: return
+    db.user_settings.update_one(
+        {"user_id": user_id},
+        {"$set": {"name": name}},
+        upsert=True
+    )
+
 def get_lang(user_id):
     if not db: return None
     result = db.user_settings.find_one({"user_id": user_id})
