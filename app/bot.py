@@ -443,7 +443,40 @@ async def handle_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE)
             elif "locket.com/" in username:
                 username = username.split("locket.com/")[-1].split("?")[0]
             
-            await queue_request(update, context, username)
+            # 1. Resolve UID
+            msg = await update.message.reply_text(T("resolving", lang), parse_mode=ParseMode.HTML)
+            uid = await locket.resolve_uid(username)
+            if not uid:
+                await msg.edit_text(T("not_found", lang), parse_mode=ParseMode.HTML)
+                return
+                
+            # 2. Check limits
+            if user_id not in ADMIN_IDS and not db.check_can_request(user_id):
+                await msg.edit_text(T("limit_reached", lang), parse_mode=ParseMode.HTML)
+                return
+                
+            # 3. Add to queue directly (auto-bypass the manual confirmation button)
+            item = {
+                'user_id': user_id,
+                'uid': uid,
+                'username': username,
+                'chat_id': msg.chat_id,
+                'message_id': msg.message_id, 
+                'lang': lang
+            }
+            
+            async with queue_lock:
+                pending_items.append(item)
+                position = len(pending_items)
+                ahead = position - 1
+            
+            await msg.edit_text(
+                T("queued", lang).format(username, position, ahead),
+                parse_mode=ParseMode.HTML
+            )
+            
+            await request_queue.put(item)
+            
     except Exception as e:
         logger.error(f"WebApp Data parse error: {e}")
         await update.message.reply_text(f"{E_ERROR} Lỗi xử lý dữ liệu WebApp!", parse_mode=ParseMode.HTML)
