@@ -243,26 +243,20 @@ async def noti_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Usage: /noti {message}")
         return
 
-    users_list = []
-    if db.db is not None:
-        # Lấy full users list thay vì chỉ distinct
-        all_logs = db.db.usage_logs.find({})
-        all_settings = db.db.user_settings.find({})
-        seen = set()
-        
-        for u in all_logs:
-            if u["user_id"] not in seen:
-                users_list.append({"id": u["user_id"], "name": u.get("name", "")})
-                seen.add(u["user_id"])
-        
-        for u in all_settings:
-            if u["user_id"] not in seen:
-                users_list.append({"id": u["user_id"], "name": u.get("name", "")})
-                seen.add(u["user_id"])
-                
-    if not users_list:
+    # Lấy danh sách user IDs từ hàm gốc, rồi bổ sung tên
+    user_ids = db.get_all_users()
+    if not user_ids:
         await update.message.reply_text("No users found in database.")
         return
+    
+    users_list = []
+    for uid in user_ids:
+        name = ""
+        if db.db is not None:
+            setting = db.db.user_settings.find_one({"user_id": uid})
+            if setting:
+                name = setting.get("name", "")
+        users_list.append({"id": uid, "name": name or "bạn"})
 
     status_msg = await update.message.reply_text(
         f"{E_LOADING} <b>Starting broadcast to {len(users_list)} users...</b>",
