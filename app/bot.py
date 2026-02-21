@@ -719,7 +719,7 @@ async def queue_worker(app, worker_id):
 
 def get_main_menu_keyboard(lang):
     # Sử dụng WebApp rực rỡ
-    webapp_url = "https://locketgold-926y.onrender.com/webapp"
+    webapp_url = "https://bot-locket-mai2.onrender.com/webapp"
     
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🚀 MỞ TOOL HACK LOCKET", web_app=WebAppInfo(url=webapp_url))],
