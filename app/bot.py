@@ -2,8 +2,7 @@ import asyncio
 import logging
 import random
 import time
-import json
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ForceReply, WebAppInfo
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
 from telegram.constants import ParseMode
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from app.config import * # Đảm bảo app/config.py đã có biến ADMIN_IDS = [...]
@@ -18,9 +17,6 @@ queue_lock = asyncio.Lock()
 
 # Anti-Spam Dictionary: {user_id: last_click_timestamp}
 user_clicks = {}
-
-# Bot username (set during init)
-BOT_USERNAME = "LocketGold22_bot"
 
 class Clr:
     HEADER = '\033[95m'
@@ -63,17 +59,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if not db.get_user_usage(user_id):
         pass 
-
-    # === WEBAPP DEEP LINK HANDLER ===
-    # When user submits from WebApp, they get redirected here with /start wa_USERNAME
-    if context.args and context.args[0].startswith("wa_"):
-        username = context.args[0][3:]  # Remove 'wa_' prefix
-        # URL decode the username
-        from urllib.parse import unquote
-        username = unquote(username)
-        db.set_user_name(user_id, update.effective_user.full_name)
-        await queue_request(update, context, username)
-        return
 
     banner = db.get_config("start_banner", None)
     
@@ -383,6 +368,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.reply_to_message or not update.message.reply_to_message.from_user.is_bot:
         return
 
+    # Delete the prompt message to keep chat clean if replying to bot's ForceReply
+    if update.message.reply_to_message and update.message.reply_to_message.from_user.is_bot:
+        try:
+            await update.message.reply_to_message.delete()
+        except: pass
+
     user_id = update.effective_user.id
     text = update.message.text.strip()
     lang = db.get_lang(user_id) or DEFAULT_LANG
@@ -397,13 +388,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         username = text
 
-    await queue_request(update, context, username)
-
-
-async def queue_request(update: Update, context: ContextTypes.DEFAULT_TYPE, username: str):
-    user_id = update.effective_user.id
-    lang = db.get_lang(user_id) or DEFAULT_LANG
-    
     msg = await update.message.reply_text(T("resolving", lang), parse_mode=ParseMode.HTML)
     
     uid = await locket.resolve_uid(username)
@@ -436,31 +420,6 @@ async def queue_request(update: Update, context: ContextTypes.DEFAULT_TYPE, user
         parse_mode=ParseMode.HTML,
         reply_markup=reply_markup
     )
-
-async def handle_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Xử lý dữ liệu trả về từ Telegram Mini App"""
-    if not update.message.web_app_data:
-        return
-        
-    user_id = update.effective_user.id
-    lang = db.get_lang(user_id) or DEFAULT_LANG
-    db.set_user_name(user_id, update.effective_user.full_name)
-    
-    try:
-        data = json.loads(update.message.web_app_data.data)
-        if data.get("action") == "activate" and data.get("username"):
-            username = data["username"]
-            
-            # Xử lý locket.cam link format y như handle_text
-            if "locket.cam/" in username:
-                username = username.split("locket.cam/")[-1].split("?")[0]
-            elif "locket.com/" in username:
-                username = username.split("locket.com/")[-1].split("?")[0]
-            
-            await queue_request(update, context, username)
-    except Exception as e:
-        logger.error(f"WebApp Data parse error: {e}")
-        await update.message.reply_text(f"{E_ERROR} Lỗi xử lý dữ liệu WebApp!", parse_mode=ParseMode.HTML)
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -732,11 +691,7 @@ async def queue_worker(app, worker_id):
             request_queue.task_done()
 
 def get_main_menu_keyboard(lang):
-    # WebApp URL with bot username for deep link callback
-    webapp_url = f"https://bot-locket-mai2.onrender.com/webapp?bot={BOT_USERNAME}"
-    
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🚀 MỞ TOOL HACK LOCKET", web_app=WebAppInfo(url=webapp_url))],
         [InlineKeyboardButton(T("btn_input", lang), callback_data="menu_input")],
         [InlineKeyboardButton(T("btn_lang", lang), callback_data="menu_lang"),
          InlineKeyboardButton(T("btn_help", lang), callback_data="menu_help")]
@@ -765,8 +720,7 @@ def run_bot():
     
     app.add_handler(CallbackQueryHandler(callback_handler))
     
-    # Tách luồng xử lý tin tức text: một cho Admin trả lời feedback, một cho logic nhập UID, một cho WebApp
-    app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, handle_webapp_data))
+    # Tách hai luồng xử lý tin tức text: một cho Admin trả lời feedback, một cho logic nhập UID
     app.add_handler(MessageHandler(filters.TEXT & filters.REPLY, admin_reply_handler), group=1)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text), group=0)
     

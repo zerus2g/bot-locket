@@ -101,97 +101,89 @@ async def inject_gold(uid, token_config, log_callback=None):
         if log_callback:
             log_callback(msg)
 
+    url = "https://api.revenuecat.com/v1/receipts"
+    
+    # Use provided token config
+    fetch_token = token_config['fetch_token']
+    app_transaction = token_config['app_transaction']
+    is_sandbox = token_config['is_sandbox']
+    
+    body = {
+        "product_id": "locket_199_1m", 
+        "fetch_token": fetch_token, 
+        "app_transaction": app_transaction,
+        "app_user_id": uid, 
+        "is_restore": True, 
+        "store_country": "VNM", 
+        "currency": "VND",
+        "price": "49000", 
+        "normal_duration": "P1M", 
+        "subscription_group_id": "21419447",
+        "observer_mode": False, 
+        "initiation_source": "restore", 
+        "offers": [],
+        "attributes": { 
+            "$attConsentStatus": { "updated_at_ms": int(time.time() * 1000), "value": "notDetermined" } 
+        }
+    }
+    
+    current_headers = HEADERS.copy()
+    current_headers['Content-Length'] = str(len(json.dumps(body)))
+    
+    if token_config.get('hash_params'):
+        current_headers['X-Post-Params-Hash'] = token_config['hash_params']
+    if token_config.get('hash_headers'):
+        current_headers['X-Headers-Hash'] = token_config['hash_headers']
+    
+    # Important update based on token type
+    current_headers['X-Is-Sandbox'] = str(is_sandbox).lower()
+
     log(f"{Clr.BLUE}[*] Target Identified:{Clr.ENDC} {uid}")
     log(f"{Clr.BLUE}[*] Loading Exploit Payload (RevenueCat)...{Clr.ENDC}")
+    log(f"{Clr.BLUE}[*] Using Token Set: {token_config.get('name', 'Custom')}{Clr.ENDC}")
 
-    # Auto-Retry with Token Switching Logic
-    for token_index, current_token_config in enumerate(TOKEN_SETS):
-        log(f"{Clr.BLUE}[*] Using Token Set {token_index+1}/{len(TOKEN_SETS)}: {current_token_config.get('name', 'Custom')}{Clr.ENDC}")
-        
-        # Prepare dynamic payload for this token
-        fetch_token = current_token_config['fetch_token']
-        app_transaction = current_token_config['app_transaction']
-        is_sandbox = current_token_config['is_sandbox']
-        
-        body = {
-            "product_id": "locket_199_1m", 
-            "fetch_token": fetch_token, 
-            "app_transaction": app_transaction,
-            "app_user_id": uid, 
-            "is_restore": True, 
-            "store_country": "VNM", 
-            "currency": "VND",
-            "price": "49000", 
-            "normal_duration": "P1M", 
-            "subscription_group_id": "21419447",
-            "observer_mode": False, 
-            "initiation_source": "restore", 
-            "offers": [],
-            "attributes": { 
-                "$attConsentStatus": { "updated_at_ms": int(time.time() * 1000), "value": "notDetermined" } 
-            }
-        }
-        
-        current_headers = HEADERS.copy()
-        current_headers['Content-Length'] = str(len(json.dumps(body)))
-        
-        if current_token_config.get('hash_params'):
-            current_headers['X-Post-Params-Hash'] = current_token_config['hash_params']
-        if current_token_config.get('hash_headers'):
-            current_headers['X-Headers-Hash'] = current_token_config['hash_headers']
-        
-        current_headers['X-Is-Sandbox'] = str(is_sandbox).lower()
-
-        async with aiohttp.ClientSession() as session:
-            for attempt in range(2): # 2 attempts per token
-                try:
-                    log(f"{Clr.WARNING}[>] Attempt {attempt+1}/2 (Token {token_index+1}):{Clr.ENDC} Sending Receipt...")
-                    async with session.post(url, headers=current_headers, json=body, timeout=15) as res:
-                        status_code = res.status
-                        
-                        if status_code == 200:
-                            log(f"{Clr.GREEN}[+] HTTP 200 OK.{Clr.ENDC} Verifying Entitlement...")
+    async with aiohttp.ClientSession() as session:
+        for attempt in range(5):
+            try:
+                log(f"{Clr.WARNING}[>] Attempt {attempt+1}/5:{Clr.ENDC} Sending Receipt...")
+                async with session.post(url, headers=current_headers, json=body, timeout=15) as res:
+                    status_code = res.status
+                    
+                    if status_code == 200:
+                        log(f"{Clr.GREEN}[+] HTTP 200 OK.{Clr.ENDC} Verifying Entitlement...")
+                        status = await check_status(uid)
+                        if status and status.get('active'):
+                            log(f"{Clr.GREEN}[SUCCESS] Gold Entitlement Active!{Clr.ENDC}")
+                            return True, "SUCCESS"
+                        else:
+                            log(f"{Clr.WARNING}[!] Entitlement not found immediately. Retrying verification...{Clr.ENDC}")
+                            await asyncio.sleep(2)
                             status = await check_status(uid)
                             if status and status.get('active'):
-                                log(f"{Clr.GREEN}[SUCCESS] Gold Entitlement Active!{Clr.ENDC}")
+                                log(f"{Clr.GREEN}[SUCCESS] Gold Active after delay.{Clr.ENDC}")
                                 return True, "SUCCESS"
-                            else:
-                                log(f"{Clr.WARNING}[!] Entitlement not found immediately. Retrying verification...{Clr.ENDC}")
-                                await asyncio.sleep(2)
-                                status = await check_status(uid)
-                                if status and status.get('active'):
-                                    log(f"{Clr.GREEN}[SUCCESS] Gold Active after delay.{Clr.ENDC}")
-                                    return True, "SUCCESS"
-                                log(f"{Clr.FAIL}[-] Exploitation Failed: Valid receipt but no Gold.{Clr.ENDC}")
-                                # Do not switch token for 200 OK without Gold, just return False
-                                return False, "Accepted but NO Gold (Expired?)"
-                                
-                        elif status_code == 529:
-                            log(f"{Clr.WARNING}[!] Server Busy (529). Cooldown 2s...{Clr.ENDC}")
-                            await asyncio.sleep(2)
-                            continue
+                            log(f"{Clr.FAIL}[-] Exploitation Failed: Valid receipt but no Gold.{Clr.ENDC}")
+                            return False, "Accepted but NO Gold (Expired?)"
                             
-                        else:
-                            msg = "Unknown Error"
-                            try:
-                                resp_json = await res.json()
-                                msg = resp_json.get('message', str(status_code))
-                            except:
-                                msg = str(status_code)
-                            log(f"{Clr.FAIL}[x] Request Rejected (Token {token_index+1}): {msg}{Clr.ENDC}")
-                            # Break the inner retry loop to switch to the NEXT Token
-                            break 
+                    elif status_code == 529:
+                        log(f"{Clr.WARNING}[!] Server Busy (529). Cooldown 2s...{Clr.ENDC}")
+                        await asyncio.sleep(2)
+                        continue
                         
-                except Exception as e:
-                    log(f"{Clr.FAIL}[!] Network Error (Token {token_index+1}): {e}{Clr.ENDC}")
-                    if attempt == 1:
-                        break # Go to next token
-                    await asyncio.sleep(2)
+                    else:
+                        msg = "Unknown Error"
+                        try:
+                            resp_json = await res.json()
+                            msg = resp_json.get('message', str(status_code))
+                        except:
+                            msg = str(status_code)
+                        log(f"{Clr.FAIL}[x] Request Rejected: {msg}{Clr.ENDC}")
+                        return False, f"Rejected: {msg}"
+                    
+            except Exception as e:
+                log(f"{Clr.FAIL}[!] Network Error: {e}{Clr.ENDC}")
+                if attempt == 4:
+                    return False, f"Request Error: {str(e)}"
+                await asyncio.sleep(2)
             
-            # If we reach here, the current token failed. Wait before trying the next token
-            if token_index < len(TOKEN_SETS) - 1:
-                log(f"{Clr.WARNING}[!] Token {token_index+1} failed. Switching to Token {token_index+2}...{Clr.ENDC}")
-                await asyncio.sleep(1.5)
-            
-    # Fallback return (should be unreachable due to loop structure but safe to keep)
-    return False, "All Tokens Failed / Timeout"
+    return False, "Timeout / Failed after retries"
