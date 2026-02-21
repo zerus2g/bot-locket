@@ -1,17 +1,18 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Locket Gold Activator</title>
-    <!-- Font -->
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@500;700&display=swap" rel="stylesheet">
-    <!-- Telegram WebApp JS -->
+    <link
+        href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@500;700&display=swap"
+        rel="stylesheet">
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
         :root {
             --bg-color: #050505;
-            --neon-color: #ffaa00; /* Locket Gold hue */
+            --neon-color: #ffaa00;
             --glass-bg: rgba(255, 170, 0, 0.05);
             --glass-border: rgba(255, 170, 0, 0.2);
         }
@@ -31,7 +32,6 @@
             position: relative;
         }
 
-        /* Ambient Glow Background */
         .glow-bg {
             position: absolute;
             top: 50%;
@@ -39,7 +39,7 @@
             transform: translate(-50%, -50%);
             width: 300px;
             height: 300px;
-            background: radial-gradient(circle, rgba(255,170,0,0.2) 0%, rgba(0,0,0,0) 70%);
+            background: radial-gradient(circle, rgba(255, 170, 0, 0.2) 0%, rgba(0, 0, 0, 0) 70%);
             z-index: 0;
             pointer-events: none;
         }
@@ -71,7 +71,7 @@
         }
 
         p.subtitle {
-            color: rgba(255,255,255,0.6);
+            color: rgba(255, 255, 255, 0.6);
             font-size: 14px;
             margin-bottom: 30px;
         }
@@ -83,7 +83,7 @@
 
         input {
             width: 100%;
-            background: rgba(0,0,0,0.5);
+            background: rgba(0, 0, 0, 0.5);
             border: 1px solid var(--glass-border);
             border-radius: 12px;
             padding: 15px;
@@ -101,7 +101,7 @@
         }
 
         input::placeholder {
-            color: rgba(255,255,255,0.3);
+            color: rgba(255, 255, 255, 0.3);
         }
 
         .btn-activate {
@@ -132,20 +132,19 @@
             cursor: not-allowed;
         }
 
-        /* Hacking Processing Loader */
         .terminal-loader {
             display: none;
             margin-top: 20px;
             text-align: left;
-            background: rgba(0,0,0,0.8);
+            background: rgba(0, 0, 0, 0.8);
             padding: 15px;
             border-radius: 10px;
             border: 1px solid #333;
             font-family: monospace;
             font-size: 12px;
             color: #0f0;
-            height: 100px;
-            overflow: hidden;
+            max-height: 120px;
+            overflow-y: auto;
         }
 
         .log-line {
@@ -155,7 +154,9 @@
         }
 
         @keyframes fadeIn {
-            to { opacity: 1; }
+            to {
+                opacity: 1;
+            }
         }
 
         .scan-line {
@@ -171,21 +172,27 @@
         }
 
         @keyframes scan {
-            0% { top: 0; }
-            100% { top: 100%; }
+            0% {
+                top: 0;
+            }
+
+            100% {
+                top: 100%;
+            }
         }
     </style>
 </head>
+
 <body>
     <div class="glow-bg"></div>
     <div class="scan-line"></div>
-    
+
     <div class="container">
         <h1>LOCKET GOLD</h1>
         <p class="subtitle">System Override Terminal v3.0</p>
 
         <div class="input-group">
-            <input type="text" id="username" placeholder="Enter Username (e.g. abcd) ⚡" autocomplete="off">
+            <input type="text" id="username" placeholder="Enter Username hoặc Link locket.cam ⚡" autocomplete="off">
         </div>
 
         <button class="btn-activate" id="activateBtn" onclick="startActivation()">INITIATE HACK</button>
@@ -196,22 +203,23 @@
     </div>
 
     <script>
-        // Init Telegram WebApp
         const tg = window.Telegram.WebApp;
-        tg.expand(); // Expand to full height
-
-        // Colors sync with TG theme optionally, but we enforce Dark Neon here
+        tg.expand();
         tg.setHeaderColor('#050505');
+
+        // Get bot username from URL query parameter
+        const urlParams = new URLSearchParams(window.location.search);
+        const botUsername = urlParams.get('bot') || 'LocketGold22_bot';
 
         const logs = [
             "[sys] Bypassing target sub-routines...",
-            "[cmd] Resolving username in db...",
+            "[cmd] Resolving username in database...",
             "[net] Proxy routing sequence initiated...",
             "[auth] Injecting payload into endpoint...",
             "[warn] Target firewall detected! Evading...",
             "[sys] Modifying subscription entitlements...",
             "[auth] Success. Key authenticated.",
-            "[*] Process complete. Sending data back to bot."
+            "[*] Redirecting back to bot..."
         ];
 
         function startActivation() {
@@ -224,7 +232,7 @@
             const btn = document.getElementById('activateBtn');
             const terminal = document.getElementById('terminal');
             const logContainer = document.getElementById('logs');
-            
+
             btn.disabled = true;
             btn.innerText = "PROCESSING...";
             terminal.style.display = "block";
@@ -241,17 +249,20 @@
                     i++;
                 } else {
                     clearInterval(logInterval);
-                    // Send data back to telegram bot via WebApp
-                    const payload = {
-                        action: "activate",
-                        username: username
-                    };
-                    // Send data securely back to the bot chat
-                    tg.sendData(JSON.stringify(payload));
-                    tg.close();
+                    btn.innerText = "✅ DONE - REDIRECTING...";
+
+                    // Deep link redirect back to bot with the username
+                    // This works with InlineKeyboardButton web_app type
+                    const encodedUsername = encodeURIComponent(username);
+                    const deepLink = `https://t.me/${botUsername}?start=wa_${encodedUsername}`;
+
+                    setTimeout(() => {
+                        window.location.href = deepLink;
+                    }, 800);
                 }
-            }, 600); // 600ms per fake loading line
+            }, 600);
         }
     </script>
 </body>
+
 </html>

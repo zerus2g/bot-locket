@@ -19,6 +19,9 @@ queue_lock = asyncio.Lock()
 # Anti-Spam Dictionary: {user_id: last_click_timestamp}
 user_clicks = {}
 
+# Bot username (set during init)
+BOT_USERNAME = "LocketGold22_bot"
+
 class Clr:
     HEADER = '\033[95m'
     BLUE = '\033[94m'
@@ -60,6 +63,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if not db.get_user_usage(user_id):
         pass 
+
+    # === WEBAPP DEEP LINK HANDLER ===
+    # When user submits from WebApp, they get redirected here with /start wa_USERNAME
+    if context.args and context.args[0].startswith("wa_"):
+        username = context.args[0][3:]  # Remove 'wa_' prefix
+        # URL decode the username
+        from urllib.parse import unquote
+        username = unquote(username)
+        db.set_user_name(user_id, update.effective_user.full_name)
+        await queue_request(update, context, username)
+        return
 
     banner = db.get_config("start_banner", None)
     
@@ -443,40 +457,7 @@ async def handle_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE)
             elif "locket.com/" in username:
                 username = username.split("locket.com/")[-1].split("?")[0]
             
-            # 1. Resolve UID
-            msg = await update.message.reply_text(T("resolving", lang), parse_mode=ParseMode.HTML)
-            uid = await locket.resolve_uid(username)
-            if not uid:
-                await msg.edit_text(T("not_found", lang), parse_mode=ParseMode.HTML)
-                return
-                
-            # 2. Check limits
-            if user_id not in ADMIN_IDS and not db.check_can_request(user_id):
-                await msg.edit_text(T("limit_reached", lang), parse_mode=ParseMode.HTML)
-                return
-                
-            # 3. Add to queue directly (auto-bypass the manual confirmation button)
-            item = {
-                'user_id': user_id,
-                'uid': uid,
-                'username': username,
-                'chat_id': msg.chat_id,
-                'message_id': msg.message_id, 
-                'lang': lang
-            }
-            
-            async with queue_lock:
-                pending_items.append(item)
-                position = len(pending_items)
-                ahead = position - 1
-            
-            await msg.edit_text(
-                T("queued", lang).format(username, position, ahead),
-                parse_mode=ParseMode.HTML
-            )
-            
-            await request_queue.put(item)
-            
+            await queue_request(update, context, username)
     except Exception as e:
         logger.error(f"WebApp Data parse error: {e}")
         await update.message.reply_text(f"{E_ERROR} Lỗi xử lý dữ liệu WebApp!", parse_mode=ParseMode.HTML)
@@ -751,8 +732,8 @@ async def queue_worker(app, worker_id):
             request_queue.task_done()
 
 def get_main_menu_keyboard(lang):
-    # Sử dụng WebApp rực rỡ
-    webapp_url = "https://bot-locket-mai2.onrender.com/webapp"
+    # WebApp URL with bot username for deep link callback
+    webapp_url = f"https://bot-locket-mai2.onrender.com/webapp?bot={BOT_USERNAME}"
     
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🚀 MỞ TOOL HACK LOCKET", web_app=WebAppInfo(url=webapp_url))],
